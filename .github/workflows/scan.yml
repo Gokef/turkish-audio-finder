@@ -1,0 +1,26 @@
+# OPTIONAL: run the scanner on GitHub Actions instead of on Render.
+# Use this if Torrentio blocks Render's IPs, or to keep the Render instance idle.
+# Then set SCANNER_ENABLED=false on Render (it will reload results from Upstash).
+# Required repo secrets: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+name: scan
+on:
+  # Uncomment to run automatically every 8 hours (after adding the secrets):
+  # schedule:
+  #   - cron: "0 */8 * * *"
+  workflow_dispatch: {}
+concurrency: scan
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --omit=dev
+      - run: node scripts/scan.js --max-minutes 330
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}

@@ -1,0 +1,26 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: turkish-audio-finder
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Free Render disks are wiped on every restart/deploy -> keep scan results in Upstash.
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: SCANNER_ENABLED
+        value: "true"
+      - key: TORRENTIO_CONCURRENCY
+        value: "2"
+      - key: TORRENTIO_MIN_INTERVAL_MS
+        value: "1500"
+      - key: SCAN_INTERVAL_HOURS
+        value: "12"

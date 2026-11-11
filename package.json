@@ -1,0 +1,20 @@
+{
+  "name": "turkish-audio-finder",
+  "version": "2.0.0",
+  "description": "Stremio addon: catalogs of movies and series with Turkish (dual) audio releases on Torrentio",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "scan": "node scripts/scan.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "stremio-addon-sdk": "^1.6.10"
+  }
+}
