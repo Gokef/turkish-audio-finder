@@ -1,0 +1,56 @@
+# Serverless mode: scan Torrentio on GitHub Actions and publish the addon as static files
+# on GitHub Pages (branch gh-pages). Install URL: https://<user>.github.io/<repo>/manifest.json
+name: scan-and-publish
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Max scan minutes"
+        default: "320"
+permissions:
+  contents: write
+concurrency:
+  group: scan-and-publish
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --omit=dev
+
+      - name: Restore previous results from gh-pages
+        run: |
+          mkdir -p site/data
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch --depth 1 origin gh-pages
+            git show origin/gh-pages:data/db.json.gz > site/data/db.json.gz || rm -f site/data/db.json.gz
+          fi
+          ls -la site/data
+
+      - name: Scan Torrentio
+        env:
+          DATA_DIR: site/data
+        run: node scripts/scan.js --max-minutes "${{ github.event.inputs.minutes || '320' }}"
+
+      - name: Build static addon
+        env:
+          DATA_DIR: site/data
+        run: node scripts/build-static.js site "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
+      - name: Publish to gh-pages
+        run: |
+          cd site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Update catalogs $(date -u +%FT%TZ)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
