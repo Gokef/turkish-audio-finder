@@ -5,6 +5,22 @@ This addon adds two catalogs to your Stremio home screen:
 - **🇹🇷 Turkish Dual-Audio Movies**
 - **🇹🇷 Turkish Dual-Audio Series**
 
+## Install (Android or any Stremio)
+
+Open Stremio → **Add-ons** → paste this into the search bar → **Install**:
+
+```
+https://gokef.github.io/turkish-audio-finder/manifest.json
+```
+
+Other presets, install only one: `…/all/manifest.json` (also Turkish-only dubs), `…/1080p/manifest.json`, `…/4k/manifest.json`. You can also open https://gokef.github.io/turkish-audio-finder/ for install buttons.
+
+**How it's hosted (serverless, free):** `.github/workflows/pages.yml` runs every 6 hours on GitHub Actions. It scans Torrentio, saves the results to `data/db.json.gz` on the `gh-pages` branch, and publishes the manifest and every catalog page as static files on GitHub Pages. You don't need a server or any other account. If GitHub ever pauses the schedule (it does that to inactive repos after 60 days), re-enable it from the repo's **Actions** tab. Static hosting can't take per-user options, which is why there are presets.
+
+The Render / server setup below is still supported if you want the configurable version.
+
+---
+
 A background scanner goes through thousands of titles from Cinemeta and asks Torrentio for each one's releases. It then sorts out which releases really have Turkish **audio**, as opposed to Turkish subtitles. The addon only supplies catalogs. When you open a title, the streams still come from your own Torrentio addon, with your own settings and debrid.
 
 ```

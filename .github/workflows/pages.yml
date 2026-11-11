@@ -38,7 +38,7 @@ jobs:
       - name: Scan Torrentio
         env:
           DATA_DIR: site/data
-        run: node scripts/scan.js --max-minutes "${{ github.event.inputs.minutes || '320' }}"
+        run: node scripts/scan.js --limit 20000 --max-minutes "${{ github.event.inputs.minutes || '320' }}"
 
       - name: Build static addon
         env:
