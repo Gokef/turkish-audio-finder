@@ -20,12 +20,15 @@ const { Store } = require('../src/store');
 const { createAddon, buildManifest, streamsFor } = require('../src/addon');
 
 // Each preset is a separately installable addon (static hosting can't take per-user options).
+// verifiedOnly presets list only titles/releases whose Turkish audio track was confirmed by scripts/verify.js.
 const PRESETS = [
-  { dir: '', suffix: '', label: 'Dual / Multi audio (recommended)', cfg: {} },
-  { dir: 'all', suffix: ' (all Turkish audio)', label: 'All Turkish audio, incl. Turkish-only dubs', cfg: { mode: 'verified' } },
-  { dir: '1080p', suffix: ' (1080p+)', label: 'Dual audio, 1080p or better', cfg: { quality: '1080p or better' } },
-  { dir: '4k', suffix: ' (4K)', label: 'Dual audio, 4K only', cfg: { quality: '4K only' } },
-  { dir: 'verified', suffix: ' (verified)', label: 'Only titles whose Turkish audio track was verified', cfg: { mode: 'confirmed' } },
+  { dir: '', suffix: '', label: 'Verified Turkish audio (recommended)', cfg: { mode: 'confirmed' }, verifiedOnly: true },
+  { dir: '1080p', suffix: ' (1080p+)', label: 'Verified Turkish audio, 1080p or better', cfg: { mode: 'confirmed', quality: '1080p or better' }, verifiedOnly: true },
+  { dir: '4k', suffix: ' (4K)', label: 'Verified Turkish audio, 4K only', cfg: { mode: 'confirmed', quality: '4K only' }, verifiedOnly: true },
+  // Old address of the verified list; identical to the main one.
+  { dir: 'verified', suffix: ' (verified)', label: 'Verified Turkish audio (same as main)', cfg: { mode: 'confirmed' }, verifiedOnly: true },
+  { dir: 'unverified', suffix: ' (incl. unchecked)', label: 'Also titles not checked yet (detected from release names)', cfg: {}, verifiedOnly: false },
+  { dir: 'all', suffix: ' (all, incl. unchecked)', label: 'Any Turkish audio incl. Turkish-only dubs, also unchecked', cfg: { mode: 'verified' }, verifiedOnly: false },
 ];
 
 function write(file, data) {
@@ -52,8 +55,8 @@ async function main() {
   let files = 0;
   const counts = {};
 
-  // Stream lists (same for every preset): Turkish-audio releases only.
-  const streamFiles = [];
+  // Stream lists: Turkish-audio releases only (verified-only for verifiedOnly presets).
+  const streamFiles = { true: [], false: [] };
   for (const [id, rec] of Object.entries(store.all())) {
     if (!rec.r) continue;
     const ids = new Set();
@@ -62,8 +65,10 @@ async function main() {
     for (const sid of ids) {
       // ":" is not allowed in Windows file names; series stream files are only built on Linux (GitHub Actions).
       if (sid.includes(':') && process.platform === 'win32') continue;
-      const streams = streamsFor(store, languages, rec.t, sid);
-      if (streams.length) streamFiles.push([`stream/${rec.t}/${sid}.json`, { streams, cacheMaxAge: 3600 }]);
+      for (const verifiedOnly of [true, false]) {
+        const streams = streamsFor(store, languages, rec.t, sid, { verifiedOnly });
+        if (streams.length) streamFiles[verifiedOnly].push([`stream/${rec.t}/${sid}.json`, { streams, cacheMaxAge: 3600 }]);
+      }
     }
   }
   for (const preset of PRESETS) {
@@ -78,7 +83,7 @@ async function main() {
     delete manifest.config;
     write(path.join(root, 'manifest.json'), manifest);
     files++;
-    for (const [rel, body] of streamFiles) {
+    for (const [rel, body] of streamFiles[!!preset.verifiedOnly]) {
       write(path.join(root, rel), body);
       files++;
     }
@@ -110,7 +115,8 @@ async function main() {
     builtAt: new Date().toISOString(),
     scannedTitles: titles.length,
     candidates: (() => { try { return JSON.parse(fs.readFileSync(path.join(cfg.dataDir, 'scan-state.json'), 'utf8')).candidates; } catch { return undefined; } })(),
-    streamFiles: streamFiles.length,
+    streamFiles: streamFiles.true.length,
+    streamFilesInclUnchecked: streamFiles.false.length,
     verifiedReleases: Object.values(store.verified || {}).filter((v) => v.v === 1).length,
     rejectedReleases: Object.values(store.verified || {}).filter((v) => v.v === 0).length,
     catalogSizes: counts,

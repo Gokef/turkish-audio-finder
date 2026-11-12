@@ -167,7 +167,7 @@ const AUDIO_NAMES = { tur: 'TUR', tr: 'TUR', eng: 'ENG', en: 'ENG' };
  * Only the releases that carry Turkish audio, verified ones first.
  * Movies: all stored releases. Series: only the probed episodes (S1E1, latest season E1).
  */
-function streamsFor(store, languages, type, id) {
+function streamsFor(store, languages, type, id, { verifiedOnly = false } = {}) {
   const baseId = id.split(':')[0];
   const rec = store.get ? store.get(baseId) : store.all()[baseId];
   if (!rec || !rec.r || rec.t !== type) return [];
@@ -176,7 +176,7 @@ function streamsFor(store, languages, type, id) {
     const lr = rec.r[lang.code];
     if (!lr || !lr.x) continue;
     const rel = effectiveReleases(lr, store.verified)
-      .filter((r) => (type === 'movie' || r.x.ep === id) && (r.verified === true || r.tier >= 2))
+      .filter((r) => (type === 'movie' || r.x.ep === id) && (r.verified === true || (!verifiedOnly && r.tier >= 2)))
       .sort((a, b) => (b.verified === true) - (a.verified === true) || b.tier - a.tier
         || (RES_RANK[b.res] || 0) - (RES_RANK[a.res] || 0) || (b.x.sd || 0) - (a.x.sd || 0));
     for (const r of rel) {
