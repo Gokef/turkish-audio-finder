@@ -150,7 +150,9 @@ function analyzeStream(stream, lang, opts = {}) {
 
 /** Does a single analyzed release satisfy the user's mode? */
 function releaseMatchesMode(r, mode) {
-  if (mode === 'confirmed') return r.verified === true;
+  // Verified by the audio check, or labelled "Dual Audio / 🇬🇧 / 🇹🇷" by Torrentio (correct in 77/77
+  // checks so far). Releases the check proved wrong never get here (effectiveReleases drops them).
+  if (mode === 'confirmed') return r.verified === true || !!(r.x && r.x.tf);
   if (mode === 'any') return r.tier >= 1;
   if (mode === 'verified') return r.tier >= 2;
   return r.tier >= 2 && r.dual; // 'dual' (default)

@@ -106,8 +106,9 @@ function toMetaPreview(id, type, rec, releases, names) {
   const best = releases.reduce((a, b) => (rank(b) > rank(a) ? b : a));
   const resList = [...new Set(releases.map((r) => RES_LABEL[r.res]))].join(' / ');
   const verified = releases.some((r) => r.verified === true);
+  const labelled = releases.some((r) => r.x && r.x.tf);
   const tags = [resList, releases.some((r) => r.hdr) ? 'HDR' : null, best.dual ? 'Dual audio' : 'Turkish audio',
-    verified ? '✅ audio verified' : null].filter(Boolean);
+    verified ? '✅ audio verified' : labelled ? 'Dual Audio 🇬🇧/🇹🇷 label' : null].filter(Boolean);
   return {
     id,
     type,
