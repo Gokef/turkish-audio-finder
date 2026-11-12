@@ -15,7 +15,30 @@ https://gokef.github.io/turkish-audio-finder/manifest.json
 
 Other presets, install only one: `…/all/manifest.json` (also Turkish-only dubs), `…/1080p/manifest.json`, `…/4k/manifest.json`. You can also open https://gokef.github.io/turkish-audio-finder/ for install buttons.
 
-**How it's hosted (serverless, free):** `.github/workflows/pages.yml` runs every 6 hours on GitHub Actions. It scans Torrentio, saves the results to `data/db.json.gz` on the `gh-pages` branch, and publishes the manifest and every catalog page as static files on GitHub Pages. You don't need a server or any other account. If GitHub ever pauses the schedule (it does that to inactive repos after 60 days), re-enable it from the repo's **Actions** tab. Static hosting can't take per-user options, which is why there are presets.
+**How it's hosted (serverless, free):** `.github/workflows/pages.yml` runs every hour on GitHub Actions. It scans Torrentio, saves the results to `data/db.json.gz` on the `gh-pages` branch, and publishes the manifest and every catalog page as static files on GitHub Pages. You don't need a server or any other account. If GitHub ever pauses the schedule (it does that to inactive repos after 60 days), re-enable it from the repo's **Actions** tab. Static hosting can't take per-user options, which is why there are presets.
+
+### Turkish-only stream list
+When you open a title, a **🇹🇷 TR Audio** section appears above Torrentio's streams. It lists only the releases with Turkish audio, labeled "✅ Turkish audio verified (TUR + ENG)" or "❔ not verified yet". These play as plain torrents, without debrid. For series, only the checked episodes get this list: episode 1 of the first and of the latest season. For other episodes, pick the same group (e.g. TURG) in Torrentio's list.
+
+### Real audio-track verification (PC)
+`scripts/verify.js` uses the Stremio desktop app's own streaming server (`127.0.0.1:11470`), which ffprobe-reads only the file header, to read each candidate release's actual audio tracks. Results go to `verified.json`, which is committed and pushed. Each push triggers a rebuild:
+- Releases with no Turkish track are hidden.
+- Verified ones get a ✅ label.
+- The `/verified/manifest.json` preset lists only titles with a verified Turkish track.
+
+```bash
+node scripts/verify.js --loop --minutes 600 --concurrency 6
+```
+- If Stremio isn't open, the script starts Stremio's server itself.
+- It writes a live `progress.html` page that refreshes every 5 s and also shows the cloud scan's progress.
+- Each check briefly joins the torrent, like starting playback, so it downloads and uploads a few MB per release.
+
+Overnight helper: `scripts/windows/watchdog.ps1`, run by a Task Scheduler task every 10 minutes until a given time. While it runs, it:
+- keeps the PC awake,
+- restarts the checker if it stopped,
+- starts a cloud scan if GitHub skipped one.
+
+At the end time it removes its own task.
 
 The Render / server setup below is still supported if you want the configurable version.
 
