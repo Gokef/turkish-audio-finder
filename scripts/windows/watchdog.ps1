@@ -5,7 +5,7 @@
 #  - after -Until: stops everything and removes its own scheduled task
 param(
   [Parameter(Mandatory = $true)][datetime]$Until,
-  [int]$Concurrency = 6,
+  [int]$Concurrency = 10,
   [string]$TaskName = 'TurkishAudioFinder-Watchdog'
 )
 
