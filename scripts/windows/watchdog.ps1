@@ -49,6 +49,25 @@ if (-not (Get-Procs 'scripts/verify.js')) {
   Log "checker was not running -> restarted ($minutes min left)"
 }
 
+# 2b) Stalled torrent engine: if the last 5 passes produced no real result at all (every check timed
+#     out), Stremio's streaming server has usually lost its connections -> restart Stremio (max once/hour).
+try {
+  $vlog = Join-Path $logDir 'verify-overnight.log'
+  $marker = Join-Path $logDir 'stremio-restart.txt'
+  $recent = (Test-Path $marker) -and ((Get-Date) - (Get-Item $marker).LastWriteTime).TotalMinutes -lt 60
+  if ((Test-Path $vlog) -and -not $recent) {
+    $passes = @(Get-Content $vlog -Tail 3000 -Encoding utf8 | Where-Object { $_ -match 'pass done: \d+ probed' } | Select-Object -Last 5)
+    $dead = $passes | Where-Object { $_ -match '"yes":0,"no":0,' }
+    if ($passes.Count -eq 5 -and $dead.Count -eq 5) {
+      Stop-Process -Name stremio-runtime, stremio-shell-ng -Force -ErrorAction SilentlyContinue
+      Start-Sleep 3
+      Start-Process (Join-Path $env:LOCALAPPDATA 'Programs\Stremio\stremio-shell-ng.exe')
+      (Get-Date).ToString('s') | Out-File $marker -Encoding utf8
+      Log 'last 5 checker passes were all timeouts -> restarted Stremio streaming server'
+    }
+  }
+} catch { Log "stall check failed: $($_.Exception.Message)" }
+
 # 3) Cloud scan: make sure one runs at least every ~75 minutes.
 try {
   $runs = gh run list -R Gokef/turkish-audio-finder --workflow scan-and-publish --limit 5 --json status,createdAt,event 2>$null | ConvertFrom-Json
