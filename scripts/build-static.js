@@ -109,6 +109,7 @@ async function main() {
   write(path.join(out, 'status.json'), {
     builtAt: new Date().toISOString(),
     scannedTitles: titles.length,
+    candidates: (() => { try { return JSON.parse(fs.readFileSync(path.join(cfg.dataDir, 'scan-state.json'), 'utf8')).candidates; } catch { return undefined; } })(),
     streamFiles: streamFiles.length,
     verifiedReleases: Object.values(store.verified || {}).filter((v) => v.v === 1).length,
     rejectedReleases: Object.values(store.verified || {}).filter((v) => v.v === 0).length,

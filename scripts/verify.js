@@ -14,10 +14,12 @@ const path = require('path');
 const zlib = require('zlib');
 const { spawn, execFileSync } = require('child_process');
 const { releaseKey, loadVerified, classifyProbe } = require('../src/verification');
+const { createProgress } = require('./progress');
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVER = process.env.STREMIO_SERVER || 'http://127.0.0.1:11470';
 const PAGES_DB = process.env.PAGES_DB_URL || 'https://gokef.github.io/turkish-audio-finder/data/db.json.gz';
+const PROGRESS_FILE = process.env.PROGRESS_FILE || path.join(ROOT, 'progress.html');
 const VERIFIED_FILE = process.env.VERIFIED_FILE || path.join(ROOT, 'verified.json');
 const DAY = 86400000;
 const RETRY_UNKNOWN_DAYS = 0.25; // retry "unknown" (no peers yet) after 6 hours
@@ -122,12 +124,14 @@ function gitPublish() {
     git('pull', '--rebase', '-X', 'theirs', 'origin', 'main');
     git('push', 'origin', 'HEAD:main');
     log('pushed verified.json');
+    return true;
   } catch (e) {
     log('git publish failed:', (e.stderr || e.message).toString().slice(0, 300));
   }
 }
 
-async function pass(deadline, state) {
+async function pass(deadline, state, P) {
+  P.phase('Looking for new titles', 'downloading the latest scan results');
   if (PUSH) {
     try {
       execFileSync('git', ['pull', '--rebase', 'origin', 'main'], { cwd: ROOT, stdio: 'pipe' });
@@ -139,9 +143,14 @@ async function pass(deadline, state) {
   const db = await loadDb();
   const queue = buildQueue(db, verified);
   log(`db: ${Object.keys(db.titles).length} titles; ${queue.length} releases to verify; ${Object.keys(verified).length} already known`);
+  P.batch(queue.length, Object.keys(verified).length);
   if (!queue.length) return 0;
 
-  if (!state.child) state.child = await ensureServer();
+  if (!state.child) {
+    P.phase('Starting Stremio server');
+    state.child = await ensureServer();
+  }
+  P.phase('Checking audio tracks', `${CONCURRENCY} releases at a time`);
   // In loop mode, publish results at least every 30 minutes.
   const passEnd = LOOP ? Math.min(deadline, Date.now() + 30 * 60000) : deadline;
   const save = () => fs.writeFileSync(VERIFIED_FILE, JSON.stringify(verified, null, 0).replace(/},"/g, '},\n"'));
@@ -151,7 +160,10 @@ async function pass(deadline, state) {
   const worker = async () => {
     while (idx < queue.length && Date.now() < passEnd) {
       const { name, x } = queue[idx++];
+      const k = releaseKey(x);
+      P.start(k, name, x.nm);
       const r = await probeRelease(x);
+      P.finish(k, name, x.nm, r);
       verified[releaseKey(x)] = { ...r, at: Date.now() };
       stats[r.v === 1 ? 'yes' : r.v === 0 ? 'no' : 'unknown']++;
       log(`${r.v === 1 ? 'TR ✓' : r.v === 0 ? 'no TR' : '  ?  '} | ${name} | ${x.nm.slice(0, 70)} | ${r.a.join(',')}${r.e ? ' | ' + r.e : ''}`);
@@ -164,23 +176,31 @@ async function pass(deadline, state) {
     save();
   }
   log(`pass done: ${done} probed`, JSON.stringify(stats));
-  if (PUSH) gitPublish();
+  if (PUSH) {
+    P.phase('Uploading results to GitHub');
+    if (gitPublish()) P.pushed();
+  }
   return done;
 }
 
 (async () => {
   const deadline = Date.now() + MINUTES * 60000;
   const state = { child: null };
+  const P = createProgress({ file: PROGRESS_FILE, deadline });
+  log('progress page:', PROGRESS_FILE);
   try {
     do {
-      const n = await pass(deadline, state);
+      const n = await pass(deadline, state, P);
       if (LOOP && Date.now() < deadline && !n) {
         log('nothing new to verify; waiting 20 min for new scan results');
+        P.phase('Waiting for new scan results', 'the cloud scan publishes new titles every 2 hours');
+        P.nextCheck(Date.now() + 20 * 60000);
         await sleep(Math.min(20 * 60000, Math.max(0, deadline - Date.now())));
       }
     } while (LOOP && Date.now() < deadline);
   } finally {
     if (state.child) state.child.kill();
+    P.stop('Finished for tonight');
   }
 })().catch((e) => {
   console.error(e);

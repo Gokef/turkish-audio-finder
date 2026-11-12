@@ -37,6 +37,7 @@ jobs:
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
             git fetch --depth 1 origin gh-pages
             git show origin/gh-pages:data/db.json.gz > site/data/db.json.gz || rm -f site/data/db.json.gz
+            git show origin/gh-pages:data/scan-state.json > site/data/scan-state.json || rm -f site/data/scan-state.json
           fi
           ls -la site/data
 

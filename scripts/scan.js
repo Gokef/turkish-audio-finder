@@ -33,6 +33,10 @@ const arg = (name, d) => {
   process.on('SIGINT', () => { scanner.stopped = true; });
   process.on('SIGTERM', () => { scanner.stopped = true; });
   await scanner.runCycle({ maxMinutes: arg('max-minutes', 0) || undefined });
+  require('fs').writeFileSync(require('path').join(cfg.dataDir, 'scan-state.json'), JSON.stringify({
+    candidates: { movie: scanner.candidates.movie.length, series: scanner.candidates.series.length },
+    lastRun: { ...scanner.state, torrentio: torrentio.stats }, at: new Date().toISOString(),
+  }));
   console.log(JSON.stringify({ ...scanner.state, torrentio: torrentio.stats }));
 })().catch((e) => {
   console.error(e);
