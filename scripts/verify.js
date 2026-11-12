@@ -37,6 +37,9 @@ const LOOP = argv.includes('--loop');
 // --retry-unknown: retry every "couldn't tell" result from before this run, regardless of age.
 const RETRY_ALL_UNKNOWN = argv.includes('--retry-unknown');
 const STARTED = Date.now();
+// Releases with fewer seeders (as reported by Torrentio at scan time) are skipped as dead.
+const MIN_SEEDERS = Number(arg('min-seeders', 2));
+const HEALTHY_SEEDERS = 5;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -105,7 +108,8 @@ async function probeRelease(x) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ torrent: { infoHash: ih }, peerSearch: { sources: [`dht:${ih}`, ...TRACKERS.map((t) => `tracker:${t}`)], min: 20, max: 80 } }),
-      signal: AbortSignal.timeout(120000),
+      // Seeded torrents deliver their metadata within seconds; don't block a slot on dead ones.
+      signal: AbortSignal.timeout(45000),
     }).then((r) => r.json());
     let idx = x.i;
     if (!Number.isInteger(idx)) {
@@ -114,7 +118,7 @@ async function probeRelease(x) {
       idx = files.reduce((best, f, i) => (f.length > (files[best] || { length: -1 }).length ? i : best), 0);
     }
     const media = `${SERVER}/${ih}/${idx}`;
-    const res = await fetch(`${SERVER}/hlsv2/probe?mediaURL=${encodeURIComponent(media)}`, { signal: AbortSignal.timeout(90000) });
+    const res = await fetch(`${SERVER}/hlsv2/probe?mediaURL=${encodeURIComponent(media)}`, { signal: AbortSignal.timeout(60000) });
     if (!res.ok) return { v: -1, a: [], e: `probe HTTP ${res.status}` };
     return classifyProbe(await res.json());
   } catch (e) {
@@ -148,24 +152,24 @@ function buildQueue(db, verified) {
   const titles = Object.entries(db.titles)
     .filter(([, r]) => r.r && r.m)
     .sort((a, b) => (a[1].m.rank ?? 1e9) - (b[1].m.rank ?? 1e9));
-  const strong = [];
-  const weak = [];
+  const items = [];
   for (const [id, rec] of titles) {
     for (const lr of Object.values(rec.r)) {
       for (const x of lr.x || []) {
         const v = verified[releaseKey(x)];
         const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY || (RETRY_ALL_UNKNOWN && v.at < STARTED));
         if (v && !retryNow) continue;
-        if (!x.sd) continue; // no seeders -> cannot probe
-        (x.t >= 2 ? strong : weak).push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, poster: rec.m.poster, x });
+        if ((x.sd || 0) < MIN_SEEDERS) continue; // dead torrent: skip
+        items.push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, poster: rec.m.poster, x, retry: !!v });
       }
     }
   }
-  // Releases that put a title in the catalog first, then weak ones (a pass can promote them).
-  // Torrentio's "Dual Audio / 🇬🇧 / 🇹🇷" releases first (most likely real), then by confidence;
-  // within that, title popularity order is kept (stable sort).
-  strong.sort((a, b) => (b.x.tf || 0) - (a.x.tf || 0) || b.x.t - a.x.t);
-  return [...strong, ...weak];
+  // Order: well-seeded first (they actually answer), never-tried before retries, then
+  // Torrentio's "Dual Audio / 🇬🇧 / 🇹🇷" label, then confidence, then more seeders.
+  const healthy = (it) => ((it.x.sd || 0) >= HEALTHY_SEEDERS ? 1 : 0);
+  items.sort((a, b) => healthy(b) - healthy(a) || a.retry - b.retry || (b.x.tf || 0) - (a.x.tf || 0)
+    || (b.x.t >= 2) - (a.x.t >= 2) || (b.x.sd || 0) - (a.x.sd || 0));
+  return items;
 }
 
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
