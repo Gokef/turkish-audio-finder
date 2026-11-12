@@ -176,8 +176,12 @@ function streamsFor(store, languages, type, id, { verifiedOnly = false } = {}) {
     const lr = rec.r[lang.code];
     if (!lr || !lr.x) continue;
     const rel = effectiveReleases(lr, store.verified)
-      .filter((r) => (type === 'movie' || r.x.ep === id) && (r.verified === true || (!verifiedOnly && r.tier >= 2)))
-      .sort((a, b) => (b.verified === true) - (a.verified === true) || (b.x.tf || 0) - (a.x.tf || 0)
+      // Torrentio's "Dual Audio / 🇬🇧 / 🇹🇷" releases are trusted enough to list even before the
+      // audio check (releases the check proved wrong are already removed by effectiveReleases).
+      .filter((r) => (type === 'movie' || r.x.ep === id)
+        && (r.verified === true || !!r.x.tf || (!verifiedOnly && r.tier >= 2)))
+      // "Dual Audio / 🇬🇧 / 🇹🇷" first, verified before unverified within each group.
+      .sort((a, b) => (b.x.tf || 0) - (a.x.tf || 0) || (b.verified === true) - (a.verified === true)
         || (b.dual === true) - (a.dual === true) || b.tier - a.tier
         || (RES_RANK[b.res] || 0) - (RES_RANK[a.res] || 0) || (b.x.sd || 0) - (a.x.sd || 0));
     for (const r of rel) {
