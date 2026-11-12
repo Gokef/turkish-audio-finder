@@ -57,7 +57,8 @@ try {
   $recent = (Test-Path $marker) -and ((Get-Date) - (Get-Item $marker).LastWriteTime).TotalMinutes -lt 60
   if ((Test-Path $vlog) -and -not $recent) {
     $passes = @(Get-Content $vlog -Tail 3000 -Encoding utf8 | Where-Object { $_ -match 'pass done: \d+ probed' } | Select-Object -Last 5)
-    $dead = $passes | Where-Object { $_ -match '"yes":0,"no":0,' }
+    # Only big passes count: small passes of retried dead torrents are expected to read nothing.
+    $dead = @($passes | Where-Object { $_ -match 'pass done: (\d+) probed' -and [int]$Matches[1] -ge 20 -and $_ -match '"yes":0,"no":0,' })
     if ($passes.Count -eq 5 -and $dead.Count -eq 5) {
       Stop-Process -Name stremio-runtime, stremio-shell-ng -Force -ErrorAction SilentlyContinue
       Start-Sleep 3

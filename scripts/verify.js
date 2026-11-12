@@ -128,7 +128,7 @@ async function loadDb() {
 const NO_PEER_SECONDS = Number(arg('no-peer-seconds', 45));
 // Stremio's torrent engine slowly chokes after hundreds of torrents (healthy torrents stop finding
 // peers). Restart it every REFRESH_MINUTES, and right away after a pass where nothing could be read.
-const REFRESH_MINUTES = Number(arg('refresh-minutes', 45));
+const REFRESH_MINUTES = Number(arg('refresh-minutes', 0)); // 0 = never (restarting interrupts the Stremio app)
 
 /** Resolves 'no peers' if the engine has found no peer for this torrent after NO_PEER_SECONDS. */
 function watchPeers(ih, ctl) {
@@ -289,8 +289,8 @@ async function pass(deadline, state, P) {
   if (!queue.length) return 0;
 
   if (!state.refreshedAt) state.refreshedAt = Date.now();
-  if (state.lastPassDead) await refreshServer(state, P, 'last pass could not read any torrent');
-  else if (Date.now() - state.refreshedAt > REFRESH_MINUTES * 60000) await refreshServer(state, P, `routine, every ${REFRESH_MINUTES} min`);
+  if (REFRESH_MINUTES > 0 && state.lastPassDead) await refreshServer(state, P, 'last pass could not read any torrent');
+  else if (REFRESH_MINUTES > 0 && Date.now() - state.refreshedAt > REFRESH_MINUTES * 60000) await refreshServer(state, P, `routine, every ${REFRESH_MINUTES} min`);
   else if (!state.child) {
     P.phase('Starting Stremio server');
     state.child = await ensureServer();
