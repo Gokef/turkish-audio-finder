@@ -172,8 +172,8 @@ To change options later, open the configure page again, pick new options, and re
 | `SCAN_INTERVAL_HOURS` | 12 | Pause between cycles once the backlog is done |
 | `MAX_SCANS_PER_CYCLE` | 3000 | Titles per cycle |
 | `RESCAN_POSITIVE_DAYS` / `RESCAN_NEGATIVE_DAYS` / `RESCAN_RECENT_NEGATIVE_DAYS` | 14 / 21 / 5 | Recheck intervals |
-| `MOVIE_TOP_DEPTH`, `MOVIE_RATING_DEPTH`, `MOVIE_YEAR_DEPTH` | 4000, 1000, 200 | Catalog size: titles taken from each Cinemeta catalog (the year catalog is taken per year) |
-| `SERIES_TOP_DEPTH`, `SERIES_RATING_DEPTH`, `SERIES_YEAR_DEPTH` | 1500, 500, 100 | Same for series |
+| `MOVIE_TOP_DEPTH`, `MOVIE_RATING_DEPTH`, `MOVIE_YEAR_DEPTH` | 8000, 3000, 400 | Catalog size: titles taken from each Cinemeta catalog (the year catalog is taken per year) |
+| `SERIES_TOP_DEPTH`, `SERIES_RATING_DEPTH`, `SERIES_YEAR_DEPTH` | 3000, 1500, 200 | Same for series |
 | `YEAR_FROM` | 1990 | Oldest year crawled by the per-year catalog |
 | `SERIES_PROBE_LATEST` | true | Also check episode 1 of the latest season |
 | `LANGUAGES` | `tr` | Enabled languages (see §6) |

@@ -39,12 +39,12 @@ function load(env = process.env) {
 
     cinemetaUrl: (env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/+$/, ''),
     // How deep to crawl Cinemeta (number of titles per source catalog).
-    movieTopDepth: int(env.MOVIE_TOP_DEPTH, 4000),
-    movieRatingDepth: int(env.MOVIE_RATING_DEPTH, 1000),
-    movieYearDepth: int(env.MOVIE_YEAR_DEPTH, 200),
-    seriesTopDepth: int(env.SERIES_TOP_DEPTH, 1500),
-    seriesRatingDepth: int(env.SERIES_RATING_DEPTH, 500),
-    seriesYearDepth: int(env.SERIES_YEAR_DEPTH, 100),
+    movieTopDepth: int(env.MOVIE_TOP_DEPTH, 8000),
+    movieRatingDepth: int(env.MOVIE_RATING_DEPTH, 3000),
+    movieYearDepth: int(env.MOVIE_YEAR_DEPTH, 400),
+    seriesTopDepth: int(env.SERIES_TOP_DEPTH, 3000),
+    seriesRatingDepth: int(env.SERIES_RATING_DEPTH, 1500),
+    seriesYearDepth: int(env.SERIES_YEAR_DEPTH, 200),
     yearFrom: int(env.YEAR_FROM, 1990),
     seriesProbeLatest: bool(env.SERIES_PROBE_LATEST, true),
 

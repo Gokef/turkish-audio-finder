@@ -22,7 +22,7 @@ const PAGES_DB = process.env.PAGES_DB_URL || 'https://gokef.github.io/turkish-au
 const PROGRESS_FILE = process.env.PROGRESS_FILE || path.join(ROOT, 'progress.html');
 const VERIFIED_FILE = process.env.VERIFIED_FILE || path.join(ROOT, 'verified.json');
 const DAY = 86400000;
-const RETRY_UNKNOWN_DAYS = 0.25; // retry "unknown" (no peers yet) after 6 hours
+const RETRY_UNKNOWN_DAYS = 1 / 24; // retry "unknown" (no peers yet) every hour: peers come and go
 const TRACKERS = ['udp://tracker.opentrackr.org:1337/announce', 'udp://open.stealth.si:80/announce',
   'udp://tracker.torrent.eu.org:451/announce', 'udp://open.demonii.com:1337/announce',
   'udp://exodus.desync.com:6969/announce', 'udp://tracker.qu.ax:6969/announce', 'udp://explodie.org:6969/announce',
@@ -41,8 +41,9 @@ const STARTED = Date.now();
 const MIN_SEEDERS = Number(arg('min-seeders', 2));
 const HEALTHY_SEEDERS = 5;
 // Releases whose only Turkish evidence is a 🇹🇷 flag in a long flag list had Turkish audio in ~3% of
-// checks (usually the flag comes from subtitles). They are skipped unless --include-weak is given.
-const INCLUDE_WEAK = argv.includes('--include-weak');
+// checks (usually the flag comes from subtitles). They are checked last, only when nothing better is
+// queued; --no-weak skips them entirely.
+const INCLUDE_WEAK = !argv.includes('--no-weak');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -104,7 +105,7 @@ async function loadDb() {
   return JSON.parse(zlib.gunzipSync(buf).toString('utf8'));
 }
 
-async function probeRelease(x) {
+async function probeRelease(x, { patient = false } = {}) {
   const ih = x.h.toLowerCase();
   try {
     const created = await fetch(`${SERVER}/${ih}/create`, {
@@ -112,7 +113,7 @@ async function probeRelease(x) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ torrent: { infoHash: ih }, peerSearch: { sources: [`dht:${ih}`, ...TRACKERS.map((t) => `tracker:${t}`)], min: 20, max: 80 } }),
       // Seeded torrents deliver their metadata within seconds; don't block a slot on dead ones.
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(patient ? 150000 : 45000),
     }).then((r) => r.json());
     let idx = x.i;
     if (!Number.isInteger(idx)) {
@@ -121,7 +122,7 @@ async function probeRelease(x) {
       idx = files.reduce((best, f, i) => (f.length > (files[best] || { length: -1 }).length ? i : best), 0);
     }
     const media = `${SERVER}/${ih}/${idx}`;
-    const res = await fetch(`${SERVER}/hlsv2/probe?mediaURL=${encodeURIComponent(media)}`, { signal: AbortSignal.timeout(60000) });
+    const res = await fetch(`${SERVER}/hlsv2/probe?mediaURL=${encodeURIComponent(media)}`, { signal: AbortSignal.timeout(patient ? 120000 : 60000) });
     if (!res.ok) return { v: -1, a: [], e: `probe HTTP ${res.status}` };
     return classifyProbe(await res.json());
   } catch (e) {
@@ -163,8 +164,9 @@ function buildQueue(db, verified) {
         const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY || (RETRY_ALL_UNKNOWN && v.at < STARTED));
         if (v && !retryNow) continue;
         if ((x.sd || 0) < MIN_SEEDERS) continue; // dead torrent: skip
-        if (x.t < 2 && !x.tf && !INCLUDE_WEAK) continue; // flag-only: almost never real Turkish audio
-        items.push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, poster: rec.m.poster, x, retry: !!v });
+        const weak = x.t < 2 && !x.tf;
+        if (weak && !INCLUDE_WEAK) continue; // flag-only: almost never real Turkish audio
+        items.push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, poster: rec.m.poster, x, retry: !!v, weak });
       }
     }
   }
@@ -179,7 +181,7 @@ function buildQueue(db, verified) {
   const byTitle = new Map();
   for (const it of items) (byTitle.get(it.id) || byTitle.set(it.id, []).get(it.id)).push(it);
   for (const list of byTitle.values()) list.sort(quality).forEach((it, i) => { it.nth = i; });
-  items.sort((a, b) => confirmed.has(a.id) - confirmed.has(b.id) || a.nth - b.nth || quality(a, b));
+  items.sort((a, b) => a.weak - b.weak || confirmed.has(a.id) - confirmed.has(b.id) || a.nth - b.nth || quality(a, b));
   return items;
 }
 
@@ -251,7 +253,7 @@ async function pass(deadline, state, P) {
       const { name, x } = item;
       const k = releaseKey(x);
       P.start(k, name, x.nm, item);
-      const r = await probeRelease(x);
+      const r = await probeRelease(x, { patient: item.retry });
       if (r === null) {
         P.drop(k);
         queue.push(item); // check again once the server is back
