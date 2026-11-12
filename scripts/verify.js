@@ -34,6 +34,13 @@ const MINUTES = Number(arg('minutes', 90));
 const CONCURRENCY = Number(arg('concurrency', 3));
 const PUSH = !argv.includes('--no-push');
 const LOOP = argv.includes('--loop');
+// How long one pass runs before re-reading scan results (new titles), and how long to wait when idle.
+// With a PC-side scan feeding --db, use short values so new titles are picked up within minutes.
+const PASS_MINUTES = Number(arg('pass-minutes', 30));
+const IDLE_MINUTES = Number(arg('idle-minutes', 20));
+// Upload results at most this often (a short pass length shouldn't mean a commit every few minutes).
+const PUSH_EVERY_MINUTES = Number(arg('push-minutes', 30));
+let lastPushAt = 0;
 // --retry-unknown: retry every "couldn't tell" result from before this run, regardless of age.
 const RETRY_ALL_UNKNOWN = argv.includes('--retry-unknown');
 const STARTED = Date.now();
@@ -245,7 +252,7 @@ async function pass(deadline, state, P) {
   }
   P.phase('Checking audio tracks', `${CONCURRENCY} releases at a time`);
   // In loop mode, publish results at least every 30 minutes.
-  const passEnd = LOOP ? Math.min(deadline, Date.now() + 30 * 60000) : deadline;
+  const passEnd = LOOP ? Math.min(deadline, Date.now() + PASS_MINUTES * 60000) : deadline;
   const save = () => fs.writeFileSync(VERIFIED_FILE, JSON.stringify(verified, null, 0).replace(/},"/g, '},\n"'));
   let idx = 0;
   let done = 0;
@@ -277,9 +284,11 @@ async function pass(deadline, state, P) {
     save();
   }
   log(`pass done: ${done} probed`, JSON.stringify(stats));
-  if (PUSH) {
+  const pushDue = !LOOP || Date.now() - lastPushAt >= PUSH_EVERY_MINUTES * 60000 || Date.now() >= deadline - 60000;
+  if (PUSH && pushDue) {
     P.phase('Uploading results to GitHub');
     if (gitPublish()) P.pushed();
+    lastPushAt = Date.now();
   }
   return done;
 }
@@ -293,10 +302,10 @@ async function pass(deadline, state, P) {
     do {
       const n = await pass(deadline, state, P);
       if (LOOP && Date.now() < deadline && !n) {
-        log('nothing new to verify; waiting 20 min for new scan results');
+        log(`nothing new to verify; waiting ${IDLE_MINUTES} min for new scan results`);
         P.phase('Waiting for new scan results', 'the cloud scan publishes new titles every hour');
-        P.nextCheck(Date.now() + 20 * 60000);
-        await sleep(Math.min(20 * 60000, Math.max(0, deadline - Date.now())));
+        P.nextCheck(Date.now() + IDLE_MINUTES * 60000);
+        await sleep(Math.min(IDLE_MINUTES * 60000, Math.max(0, deadline - Date.now())));
       }
     } while (LOOP && Date.now() < deadline);
   } finally {
