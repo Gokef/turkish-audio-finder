@@ -34,6 +34,9 @@ const MINUTES = Number(arg('minutes', 90));
 const CONCURRENCY = Number(arg('concurrency', 3));
 const PUSH = !argv.includes('--no-push');
 const LOOP = argv.includes('--loop');
+// --retry-unknown: retry every "couldn't tell" result from before this run, regardless of age.
+const RETRY_ALL_UNKNOWN = argv.includes('--retry-unknown');
+const STARTED = Date.now();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -64,7 +67,17 @@ async function ensureServer() {
 
 async function loadDb() {
   const local = arg('db', null);
-  const buf = local ? fs.readFileSync(local) : Buffer.from(await (await fetch(PAGES_DB, { signal: AbortSignal.timeout(60000) })).arrayBuffer());
+  let buf;
+  if (local) buf = fs.readFileSync(local);
+  for (let i = 1; !buf; i++) {
+    try {
+      buf = Buffer.from(await (await fetch(PAGES_DB, { signal: AbortSignal.timeout(60000) })).arrayBuffer());
+    } catch (e) {
+      if (i >= 5) throw e;
+      log(`scan results download failed (${e.cause?.code || e.message}); retrying`);
+      await sleep(20000 * i);
+    }
+  }
   return JSON.parse(zlib.gunzipSync(buf).toString('utf8'));
 }
 
@@ -105,7 +118,8 @@ function buildQueue(db, verified) {
     for (const lr of Object.values(rec.r)) {
       for (const x of lr.x || []) {
         const v = verified[releaseKey(x)];
-        if (v && (v.v !== -1 || now - v.at < RETRY_UNKNOWN_DAYS * DAY)) continue;
+        const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY || (RETRY_ALL_UNKNOWN && v.at < STARTED));
+        if (v && !retryNow) continue;
         if (!x.sd) continue; // no seeders -> cannot probe
         (x.t >= 2 ? strong : weak).push({ id, name: rec.m.name, x });
       }
@@ -115,18 +129,35 @@ function buildQueue(db, verified) {
   return [...strong, ...weak];
 }
 
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** Network git commands are retried: some home DNS servers fail intermittently. */
+function gitRetry(args, tries = 5) {
+  for (let i = 1; ; i++) {
+    try {
+      return execFileSync('git', args, { cwd: ROOT, stdio: 'pipe' }).toString().trim();
+    } catch (e) {
+      if (i >= tries) throw e;
+      sleepSync(15000 * i);
+    }
+  }
+}
+
 function gitPublish() {
   const git = (...a) => execFileSync('git', a, { cwd: ROOT, stdio: 'pipe' }).toString().trim();
   try {
     git('add', 'verified.json');
-    if (!git('status', '--porcelain', 'verified.json')) return log('nothing to push');
-    git('commit', '-m', 'Update audio verification results');
-    git('pull', '--rebase', '-X', 'theirs', 'origin', 'main');
-    git('push', 'origin', 'HEAD:main');
+    if (git('status', '--porcelain', 'verified.json')) git('commit', '-m', 'Update audio verification results');
+    // Push whenever local commits exist, including ones whose earlier push failed.
+    gitRetry(['fetch', 'origin', 'main']);
+    if (git('rev-list', '--count', 'origin/main..HEAD') === '0') return log('nothing to push');
+    git('rebase', '-X', 'theirs', 'origin/main');
+    gitRetry(['push', 'origin', 'HEAD:main']);
     log('pushed verified.json');
     return true;
   } catch (e) {
     log('git publish failed:', (e.stderr || e.message).toString().slice(0, 300));
+    try { git('rebase', '--abort'); } catch { /* not rebasing */ }
   }
 }
 
@@ -134,7 +165,7 @@ async function pass(deadline, state, P) {
   P.phase('Looking for new titles', 'downloading the latest scan results');
   if (PUSH) {
     try {
-      execFileSync('git', ['pull', '--rebase', 'origin', 'main'], { cwd: ROOT, stdio: 'pipe' });
+      gitRetry(['pull', '--rebase', '--autostash', 'origin', 'main'], 3);
     } catch (e) {
       log('git pull failed (continuing):', (e.stderr || e.message).toString().slice(0, 200));
     }
