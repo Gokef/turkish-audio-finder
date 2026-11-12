@@ -177,12 +177,14 @@ function streamsFor(store, languages, type, id, { verifiedOnly = false } = {}) {
     if (!lr || !lr.x) continue;
     const rel = effectiveReleases(lr, store.verified)
       .filter((r) => (type === 'movie' || r.x.ep === id) && (r.verified === true || (!verifiedOnly && r.tier >= 2)))
-      .sort((a, b) => (b.verified === true) - (a.verified === true) || b.tier - a.tier
+      .sort((a, b) => (b.verified === true) - (a.verified === true) || (b.x.tf || 0) - (a.x.tf || 0)
+        || (b.dual === true) - (a.dual === true) || b.tier - a.tier
         || (RES_RANK[b.res] || 0) - (RES_RANK[a.res] || 0) || (b.x.sd || 0) - (a.x.sd || 0));
     for (const r of rel) {
       const res = { '2160p': '4K', '1080p': '1080p', '720p': '720p', sd: 'SD', cam: 'CAM' }[r.res] || '';
       const audio = r.audio ? r.audio.map((a) => AUDIO_NAMES[a] || a.toUpperCase()).join(' + ') : '';
-      const status = r.verified === true ? `✅ Turkish audio verified (${audio})` : '❔ Turkish audio not verified yet';
+      const status = (r.verified === true ? `✅ Turkish audio verified (${audio})` : '❔ Turkish audio not verified yet')
+        + (r.x.tf ? ' · Dual Audio 🇬🇧/🇹🇷' : '');
       out.push({
         name: `${lang.flag} ${lang.code.toUpperCase()} Audio
 ${res}${r.hdr ? (r.dv ? ' DV' : ' HDR') : ''}`,

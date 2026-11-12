@@ -7,6 +7,9 @@ const { sleep } = require('./http');
 const DAY = 86400000;
 
 const MAX_RELEASES = 8;
+// Bump when the per-release fields change; older records get rescanned first.
+const X_VERSION = 2;
+const outdated = (l) => !l.x || l.xv !== X_VERSION;
 
 /**
  * Compact per-language summary:
@@ -17,7 +20,8 @@ const MAX_RELEASES = 8;
 function summarize(results) {
   const f = new Map();
   const names = [];
-  results.sort((a, b) => b.tier - a.tier || b.seeders - a.seeders);
+  const tf = (r) => (r.why.includes('torrentio-dual-flag') ? 1 : 0);
+  results.sort((a, b) => tf(b) - tf(a) || b.tier - a.tier || b.seeders - a.seeders);
   const x = [];
   const seen = new Set();
   for (const r of results) {
@@ -30,10 +34,12 @@ function summarize(results) {
       x.push({
         h: r.infoHash, i: r.fileIdx, ep: r.ep, t: r.tier, d: r.dual ? 1 : 0, q: r.res,
         hdr: r.hdr ? 1 : 0, dv: r.dv ? 1 : 0, nm: r.name, fn: r.filename, sd: r.seeders,
+        // Torrentio labelled it "Dual Audio / 🇬🇧 / 🇹🇷": in practice the most reliable signal.
+        tf: r.why.includes('torrentio-dual-flag') ? 1 : 0,
       });
     }
   }
-  return { f: [...f.values()], n: names, x };
+  return { f: [...f.values()], n: names, x, xv: X_VERSION };
 }
 
 class Scanner {
@@ -79,7 +85,7 @@ class Scanner {
     const age = now - rec.s;
     if (rec.r) {
       // Older records lack the per-release list (x) needed for streams/verification.
-      if (Object.values(rec.r).some((l) => !l.x)) return true;
+      if (Object.values(rec.r).some(outdated)) return true;
       return age > this.cfg.rescanPositiveDays * DAY;
     }
     const recent = c.year && c.year >= new Date().getFullYear() - 1;
@@ -99,7 +105,7 @@ class Scanner {
     const unscanned = all.filter((c) => !this.store.get(c.id));
     const upgrade = all.filter((c) => {
       const rec = this.store.get(c.id);
-      return rec && rec.r && Object.values(rec.r).some((l) => !l.x);
+      return rec && rec.r && Object.values(rec.r).some(outdated);
     });
     const upgradeIds = new Set(upgrade.map((c) => c.id));
     const stale = all.filter((c) => this.store.get(c.id) && !upgradeIds.has(c.id) && this.isDue(c, now))

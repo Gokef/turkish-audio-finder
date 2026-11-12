@@ -145,6 +145,9 @@ function buildQueue(db, verified) {
     }
   }
   // Releases that put a title in the catalog first, then weak ones (a pass can promote them).
+  // Torrentio's "Dual Audio / 🇬🇧 / 🇹🇷" releases first (most likely real), then by confidence;
+  // within that, title popularity order is kept (stable sort).
+  strong.sort((a, b) => (b.x.tf || 0) - (a.x.tf || 0) || b.x.t - a.x.t);
   return [...strong, ...weak];
 }
 
