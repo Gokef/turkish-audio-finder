@@ -141,11 +141,16 @@ function analyzeStream(stream, lang, opts = {}) {
 
   if (dualMarker) dual = true;
   const q = parseQuality(stream, `${release} ${filename}`);
-  return { tier, dual, ...q, name: release.split(' | ')[0].slice(0, 160), why };
+  const seeders = parseInt((String(stream.title || '').match(/👤\s*(\d+)/) || [])[1], 10) || 0;
+  return {
+    tier, dual, ...q, name: release.split(' | ')[0].slice(0, 160), why,
+    infoHash: stream.infoHash, fileIdx: stream.fileIdx, filename: filename || undefined, seeders,
+  };
 }
 
 /** Does a single analyzed release satisfy the user's mode? */
 function releaseMatchesMode(r, mode) {
+  if (mode === 'confirmed') return r.verified === true;
   if (mode === 'any') return r.tier >= 1;
   if (mode === 'verified') return r.tier >= 2;
   return r.tier >= 2 && r.dual; // 'dual' (default)

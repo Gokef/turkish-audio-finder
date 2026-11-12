@@ -17,7 +17,7 @@ const path = require('path');
 const config = require('../src/config');
 const { getLanguages } = require('../src/languages');
 const { Store } = require('../src/store');
-const { createAddon, buildManifest } = require('../src/addon');
+const { createAddon, buildManifest, streamsFor } = require('../src/addon');
 
 // Each preset is a separately installable addon (static hosting can't take per-user options).
 const PRESETS = [
@@ -25,6 +25,7 @@ const PRESETS = [
   { dir: 'all', suffix: ' (all Turkish audio)', label: 'All Turkish audio, incl. Turkish-only dubs', cfg: { mode: 'verified' } },
   { dir: '1080p', suffix: ' (1080p+)', label: 'Dual audio, 1080p or better', cfg: { quality: '1080p or better' } },
   { dir: '4k', suffix: ' (4K)', label: 'Dual audio, 4K only', cfg: { quality: '4K only' } },
+  { dir: 'verified', suffix: ' (verified)', label: 'Only titles whose Turkish audio track was verified', cfg: { mode: 'confirmed' } },
 ];
 
 function write(file, data) {
@@ -44,12 +45,27 @@ async function main() {
   const base = buildManifest(languages);
 
   // Remove previous build output (keep data/ and git metadata).
-  for (const p of ['catalog', 'manifest.json', 'index.html', 'status.json', ...PRESETS.filter((x) => x.dir).map((x) => x.dir)]) {
+  for (const p of ['catalog', 'stream', 'manifest.json', 'index.html', 'status.json', ...PRESETS.filter((x) => x.dir).map((x) => x.dir)]) {
     fs.rmSync(path.join(out, p), { recursive: true, force: true });
   }
 
   let files = 0;
   const counts = {};
+
+  // Stream lists (same for every preset): Turkish-audio releases only.
+  const streamFiles = [];
+  for (const [id, rec] of Object.entries(store.all())) {
+    if (!rec.r) continue;
+    const ids = new Set();
+    if (rec.t === 'movie') ids.add(id);
+    else for (const lr of Object.values(rec.r)) for (const x of lr.x || []) if (x.ep) ids.add(x.ep);
+    for (const sid of ids) {
+      // ":" is not allowed in Windows file names; series stream files are only built on Linux (GitHub Actions).
+      if (sid.includes(':') && process.platform === 'win32') continue;
+      const streams = streamsFor(store, languages, rec.t, sid);
+      if (streams.length) streamFiles.push([`stream/${rec.t}/${sid}.json`, { streams, cacheMaxAge: 3600 }]);
+    }
+  }
   for (const preset of PRESETS) {
     const root = path.join(out, preset.dir);
     const manifest = {
@@ -62,6 +78,10 @@ async function main() {
     delete manifest.config;
     write(path.join(root, 'manifest.json'), manifest);
     files++;
+    for (const [rel, body] of streamFiles) {
+      write(path.join(root, rel), body);
+      files++;
+    }
 
     for (const cat of base.catalogs) {
       const genres = [null, ...cat.extra.find((e) => e.name === 'genre').options];
@@ -89,6 +109,9 @@ async function main() {
   write(path.join(out, 'status.json'), {
     builtAt: new Date().toISOString(),
     scannedTitles: titles.length,
+    streamFiles: streamFiles.length,
+    verifiedReleases: Object.values(store.verified || {}).filter((v) => v.v === 1).length,
+    rejectedReleases: Object.values(store.verified || {}).filter((v) => v.v === 0).length,
     catalogSizes: counts,
   });
   write(path.join(out, 'index.html'), landing(base, baseUrl, counts));

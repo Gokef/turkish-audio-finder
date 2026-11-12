@@ -1,7 +1,8 @@
 'use strict';
 
 const { addonBuilder } = require('stremio-addon-sdk');
-const { releaseMatchesMode, releaseMatchesQuality } = require('./detect');
+const { releaseMatchesMode, releaseMatchesQuality, RES_RANK } = require('./detect');
+const { effectiveReleases } = require('./verification');
 const pkg = require('../package.json');
 
 const GENRES = ['Action', 'Adventure', 'Animation', 'Biography', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family',
@@ -12,6 +13,7 @@ const MODE = {
   'Dual / Multi audio only (recommended)': 'dual',
   'Any confirmed Turkish audio (also Turkish-only dubs)': 'verified',
   'Lenient (more titles, may include false positives)': 'any',
+  'Only titles with a verified Turkish audio track': 'confirmed',
 };
 const QUALITY = { 'Any quality': 'cam', '720p or better': '720p', '1080p or better': '1080p', '4K only': '2160p' };
 const SORT = { Popularity: 'rank', 'IMDb rating': 'rating', 'Newest first': 'year', 'Recently found': 'found' };
@@ -45,7 +47,7 @@ function buildManifest(languages) {
     name: 'Turkish Audio Finder',
     description: 'Catalogs of movies and series that have Turkish (dual) audio releases on Torrentio. '
       + 'Streams still come from your own Torrentio addon.',
-    resources: ['catalog'],
+    resources: ['catalog', { name: 'stream', types: ['movie', 'series'], idPrefixes: ['tt'] }],
     types: ['movie', 'series'],
     catalogs,
     behaviorHints: { configurable: true, configurationRequired: false },
@@ -77,7 +79,7 @@ function createCatalogIndex(store) {
       const lr = rec.r[langCode];
       if (!lr) continue;
       if (genre && !(rec.m.genres || []).includes(genre)) continue;
-      const releases = lr.f.map(([tier, dual, res, hdr, dv]) => ({ tier, dual: !!dual, res, hdr: !!hdr, dv: !!dv }))
+      const releases = effectiveReleases(lr, store.verified)
         .filter((r) => releaseMatchesMode(r, uc.mode) && releaseMatchesQuality(r, uc.minRes, uc.hdrOnly));
       if (!releases.length) continue;
       items.push({ id, rec, releases, names: lr.n || [] });
@@ -103,7 +105,9 @@ const RES_LABEL = { '2160p': '4K', '1080p': '1080p', '720p': '720p', sd: 'SD', c
 function toMetaPreview(id, type, rec, releases, names) {
   const best = releases.reduce((a, b) => (rank(b) > rank(a) ? b : a));
   const resList = [...new Set(releases.map((r) => RES_LABEL[r.res]))].join(' / ');
-  const tags = [resList, releases.some((r) => r.hdr) ? 'HDR' : null, best.dual ? 'Dual audio' : 'Turkish audio'].filter(Boolean);
+  const verified = releases.some((r) => r.verified === true);
+  const tags = [resList, releases.some((r) => r.hdr) ? 'HDR' : null, best.dual ? 'Dual audio' : 'Turkish audio',
+    verified ? '✅ audio verified' : null].filter(Boolean);
   return {
     id,
     type,
@@ -142,7 +146,59 @@ function createAddon({ cfg, store, languages }) {
     };
   });
 
+  builder.defineStreamHandler(async ({ type, id }) => ({
+    streams: streamsFor(store, languages, type, id),
+    cacheMaxAge: 3600,
+    staleRevalidate: 6 * 3600,
+  }));
+
   return { builder, manifest };
 }
 
-module.exports = { createAddon, buildManifest, parseUserConfig, createCatalogIndex, MODE, QUALITY, SORT };
+// Public trackers used for every stream (Torrentio's per-release lists are mostly these).
+const TRACKERS = ['udp://tracker.opentrackr.org:1337/announce', 'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce', 'udp://open.demonii.com:1337/announce',
+  'udp://exodus.desync.com:6969/announce', 'udp://tracker.qu.ax:6969/announce', 'udp://explodie.org:6969/announce',
+  'udp://tracker.dler.org:6969/announce'];
+
+const AUDIO_NAMES = { tur: 'TUR', tr: 'TUR', eng: 'ENG', en: 'ENG' };
+
+/**
+ * Only the releases that carry Turkish audio, verified ones first.
+ * Movies: all stored releases. Series: only the probed episodes (S1E1, latest season E1).
+ */
+function streamsFor(store, languages, type, id) {
+  const baseId = id.split(':')[0];
+  const rec = store.get ? store.get(baseId) : store.all()[baseId];
+  if (!rec || !rec.r || rec.t !== type) return [];
+  const out = [];
+  for (const lang of languages) {
+    const lr = rec.r[lang.code];
+    if (!lr || !lr.x) continue;
+    const rel = effectiveReleases(lr, store.verified)
+      .filter((r) => (type === 'movie' || r.x.ep === id) && (r.verified === true || r.tier >= 2))
+      .sort((a, b) => (b.verified === true) - (a.verified === true) || b.tier - a.tier
+        || (RES_RANK[b.res] || 0) - (RES_RANK[a.res] || 0) || (b.x.sd || 0) - (a.x.sd || 0));
+    for (const r of rel) {
+      const res = { '2160p': '4K', '1080p': '1080p', '720p': '720p', sd: 'SD', cam: 'CAM' }[r.res] || '';
+      const audio = r.audio ? r.audio.map((a) => AUDIO_NAMES[a] || a.toUpperCase()).join(' + ') : '';
+      const status = r.verified === true ? `✅ Turkish audio verified (${audio})` : '❔ Turkish audio not verified yet';
+      out.push({
+        name: `${lang.flag} ${lang.code.toUpperCase()} Audio
+${res}${r.hdr ? (r.dv ? ' DV' : ' HDR') : ''}`,
+        title: `${r.x.nm}
+${status}${r.x.sd ? ` · 👤 ${r.x.sd}` : ''}`,
+        infoHash: r.x.h,
+        ...(Number.isInteger(r.x.i) ? { fileIdx: r.x.i } : {}),
+        sources: [...TRACKERS.map((t) => `tracker:${t}`), `dht:${r.x.h}`],
+        behaviorHints: {
+          bingeGroup: `taf|${lang.code}|${res}`,
+          ...(r.x.fn ? { filename: r.x.fn } : {}),
+        },
+      });
+    }
+  }
+  return out;
+}
+
+module.exports = { createAddon, streamsFor, buildManifest, parseUserConfig, createCatalogIndex, MODE, QUALITY, SORT };

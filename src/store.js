@@ -77,11 +77,14 @@ class Store {
       ? new UpstashBackend(cfg.upstashUrl, cfg.upstashToken, cfg.storageKey)
       : new FileBackend(cfg.dataDir);
     this.db = { v: 1, updatedAt: 0, titles: {} };
+    this.verifiedFile = cfg.verifiedFile;
+    this.verified = {};
     this.dirty = false;
     this.version = 0; // bumps on every change → used to invalidate catalog caches
   }
 
   async load() {
+    if (this.verifiedFile) this.verified = require('./verification').loadVerified(this.verifiedFile);
     try {
       const json = await this.backend.load();
       if (json) {

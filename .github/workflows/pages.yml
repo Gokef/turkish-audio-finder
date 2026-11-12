@@ -2,13 +2,18 @@
 # on GitHub Pages (branch gh-pages). Install URL: https://<user>.github.io/<repo>/manifest.json
 name: scan-and-publish
 on:
+  # New audio verification results from the PC -> rebuild only (no scan).
+  push:
+    branches: [main]
+    paths: [verified.json]
   schedule:
-    - cron: "17 */6 * * *"
+    # Every 2 hours, ~105 min of scanning each, so results are published often.
+    - cron: "17 */2 * * *"
   workflow_dispatch:
     inputs:
       minutes:
         description: "Max scan minutes"
-        default: "320"
+        default: "105"
 permissions:
   contents: write
 concurrency:
@@ -17,7 +22,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,9 +41,10 @@ jobs:
           ls -la site/data
 
       - name: Scan Torrentio
+        if: github.event_name != 'push'
         env:
           DATA_DIR: site/data
-        run: node scripts/scan.js --limit 20000 --max-minutes "${{ github.event.inputs.minutes || '320' }}"
+        run: node scripts/scan.js --limit 20000 --max-minutes "${{ github.event.inputs.minutes || '105' }}"
 
       - name: Build static addon
         env:

@@ -60,6 +60,7 @@ function load(env = process.env) {
     upstashUrl: (env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, ''),
     upstashToken: env.UPSTASH_REDIS_REST_TOKEN || '',
     storageKey: env.STORAGE_KEY || 'taf:db:v1',
+    verifiedFile: env.VERIFIED_FILE || require('path').resolve(__dirname, '..', 'verified.json'),
     reloadMinutes: int(env.RELOAD_MINUTES, 15),
 
     extraGroups: { tr: list(env.TR_GROUPS, []) },

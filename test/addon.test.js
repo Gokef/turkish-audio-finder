@@ -52,3 +52,38 @@ test('debrid credentials are stripped from Torrentio options', () => {
   const out = sanitizeTorrentioOptions('providers=yts,1337x|realdebrid=SECRET123|language=turkish');
   assert.strictEqual(out, 'providers=yts,1337x|language=turkish');
 });
+
+const { classifyProbe, effectiveReleases } = require('../src/verification');
+const { streamsFor } = require('../src/addon');
+
+test('probe classification: Turkish track, no Turkish, untagged', () => {
+  const tr = { streams: [{ track: 'video' }, { track: 'audio', language: 'tur', title: 'Türkçe' }, { track: 'audio', language: 'eng' }] };
+  const cz = { streams: [{ track: 'audio', language: 'cze' }, { track: 'audio', language: 'eng' }] };
+  const und = { streams: [{ track: 'audio' }, { track: 'audio', language: 'eng' }] };
+  const titled = { streams: [{ track: 'audio', language: 'und', title: 'Turkish DDP 5.1' }] };
+  assert.deepStrictEqual(classifyProbe(tr), { v: 1, a: ['tur', 'eng'] });
+  assert.deepStrictEqual(classifyProbe(cz), { v: 0, a: ['cze', 'eng'] });
+  assert.strictEqual(classifyProbe(und).v, -1);
+  assert.strictEqual(classifyProbe(titled).v, 1);
+});
+
+test('verification hides disproven releases and promotes verified ones', () => {
+  const lr = { f: [], x: [
+    { h: 'aa', i: 0, t: 2, d: 1, q: '2160p', nm: 'Multi remux' },
+    { h: 'bb', i: 0, t: 1, d: 0, q: '1080p', nm: 'Flag only' },
+    { h: 'cc', i: 1, t: 3, d: 1, q: '1080p', nm: 'TURG' },
+  ] };
+  const verified = { 'aa:0': { v: 0, a: ['eng', 'fre'] }, 'bb:0': { v: 1, a: ['tur', 'eng'] } };
+  const out = effectiveReleases(lr, verified);
+  assert.deepStrictEqual(out.map((r) => r.x.nm), ['Flag only', 'TURG']);
+  assert.strictEqual(out[0].verified, true);
+  assert.strictEqual(out[0].dual, true);
+
+  const store = { verified, get: (id) => (id === 'tt1' ? { t: 'movie', r: { tr: lr } } : null) };
+  const streams = streamsFor(store, getLanguages(['tr']), 'movie', 'tt1');
+  assert.strictEqual(streams.length, 2);
+  assert.match(streams[0].title, /verified \(TUR \+ ENG\)/);
+  assert.strictEqual(streams[0].infoHash, 'bb');
+  assert.match(streams[1].title, /not verified yet/);
+  assert.deepStrictEqual(streamsFor(store, getLanguages(['tr']), 'movie', 'tt2'), []);
+});

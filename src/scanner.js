@@ -6,17 +6,34 @@ const { sleep } = require('./http');
 
 const DAY = 86400000;
 
-/** Turn analyzed releases into compact, de-duplicated feature tuples. */
+const MAX_RELEASES = 8;
+
+/**
+ * Compact per-language summary:
+ *   f: de-duplicated feature tuples [tier, dual, res, hdr, dv] (fast catalog filtering)
+ *   n: sample release names
+ *   x: the best individual releases (for the stream list and audio verification)
+ */
 function summarize(results) {
   const f = new Map();
   const names = [];
-  results.sort((a, b) => b.tier - a.tier);
+  results.sort((a, b) => b.tier - a.tier || b.seeders - a.seeders);
+  const x = [];
+  const seen = new Set();
   for (const r of results) {
     const key = [r.tier, r.dual ? 1 : 0, r.res, r.hdr ? 1 : 0, r.dv ? 1 : 0];
     f.set(key.join(','), key);
     if (names.length < 3 && !names.includes(r.name)) names.push(r.name);
+    const id = `${r.infoHash}:${r.fileIdx ?? ''}`;
+    if (r.infoHash && x.length < MAX_RELEASES && !seen.has(id)) {
+      seen.add(id);
+      x.push({
+        h: r.infoHash, i: r.fileIdx, ep: r.ep, t: r.tier, d: r.dual ? 1 : 0, q: r.res,
+        hdr: r.hdr ? 1 : 0, dv: r.dv ? 1 : 0, nm: r.name, fn: r.filename, sd: r.seeders,
+      });
+    }
   }
-  return { f: [...f.values()], n: names };
+  return { f: [...f.values()], n: names, x };
 }
 
 class Scanner {
@@ -42,7 +59,10 @@ class Scanner {
         const extraGroups = this.cfg.extraGroups[lang.code] || [];
         for (const s of streams) {
           const r = analyzeStream(s, lang, { titleName: c.name, extraGroups });
-          if (r) (found[lang.code] = found[lang.code] || []).push(r);
+          if (r) {
+            if (c.type === 'series') r.ep = sid;
+            (found[lang.code] = found[lang.code] || []).push(r);
+          }
         }
       }
       // Stop probing more episodes once a strong match is found for every language.
@@ -57,7 +77,11 @@ class Scanner {
     const rec = this.store.get(c.id);
     if (!rec) return true;
     const age = now - rec.s;
-    if (rec.r) return age > this.cfg.rescanPositiveDays * DAY;
+    if (rec.r) {
+      // Older records lack the per-release list (x) needed for streams/verification.
+      if (Object.values(rec.r).some((l) => !l.x)) return true;
+      return age > this.cfg.rescanPositiveDays * DAY;
+    }
     const recent = c.year && c.year >= new Date().getFullYear() - 1;
     return age > (recent ? this.cfg.rescanRecentNegativeDays : this.cfg.rescanNegativeDays) * DAY;
   }
@@ -73,9 +97,14 @@ class Scanner {
       if (s[i]) all.push(s[i]);
     }
     const unscanned = all.filter((c) => !this.store.get(c.id));
-    const stale = all.filter((c) => this.store.get(c.id) && this.isDue(c, now))
+    const upgrade = all.filter((c) => {
+      const rec = this.store.get(c.id);
+      return rec && rec.r && Object.values(rec.r).some((l) => !l.x);
+    });
+    const upgradeIds = new Set(upgrade.map((c) => c.id));
+    const stale = all.filter((c) => this.store.get(c.id) && !upgradeIds.has(c.id) && this.isDue(c, now))
       .sort((a, b) => this.store.get(a.id).s - this.store.get(b.id).s);
-    return [...unscanned, ...stale].slice(0, this.cfg.maxScansPerCycle);
+    return [...upgrade, ...unscanned, ...stale].slice(0, this.cfg.maxScansPerCycle);
   }
 
   /** Refresh stored metadata (rank, rating, poster) for already matched titles. */
