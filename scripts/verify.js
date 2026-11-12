@@ -181,7 +181,10 @@ function buildQueue(db, verified) {
   const byTitle = new Map();
   for (const it of items) (byTitle.get(it.id) || byTitle.set(it.id, []).get(it.id)).push(it);
   for (const list of byTitle.values()) list.sort(quality).forEach((it, i) => { it.nth = i; });
-  items.sort((a, b) => a.weak - b.weak || confirmed.has(a.id) - confirmed.has(b.id) || a.nth - b.nth || quality(a, b));
+  // Slow ones last: never-tried before retries of peerless releases, strong before weak,
+  // well-seeded (5+) before low-seeded; then unconfirmed titles, one release per title first.
+  items.sort((a, b) => a.retry - b.retry || a.weak - b.weak || healthy(b) - healthy(a)
+    || confirmed.has(a.id) - confirmed.has(b.id) || a.nth - b.nth || quality(a, b));
   return items;
 }
 
