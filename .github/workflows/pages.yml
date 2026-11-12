@@ -2,10 +2,7 @@
 # on GitHub Pages (branch gh-pages). Install URL: https://<user>.github.io/<repo>/manifest.json
 name: scan-and-publish
 on:
-  # New audio verification results from the PC -> rebuild only (no scan).
-  push:
-    branches: [main]
-    paths: [verified.json]
+  # (Audio verification results pushed from the PC are picked up by the next hourly run.)
   schedule:
     # Every hour, ~50 min of scanning each, so results are published often.
     - cron: "17 * * * *"

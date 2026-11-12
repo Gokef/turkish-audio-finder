@@ -54,6 +54,7 @@ try {
   $runs = gh run list -R Gokef/turkish-audio-finder --workflow scan-and-publish --limit 5 --json status,createdAt,event 2>$null | ConvertFrom-Json
   $active = $runs | Where-Object { $_.status -ne 'completed' }
   $last = ($runs | Sort-Object createdAt -Descending | Select-Object -First 1)
+  if (-not $runs) { Log 'GitHub check returned nothing (offline?) -> skipped'; exit 0 }
   $age = if ($last) { ($now.ToUniversalTime() - ([datetime]$last.createdAt).ToUniversalTime()).TotalMinutes } else { 999 }
   if (-not $active -and $age -gt 75) {
     gh workflow run scan-and-publish -R Gokef/turkish-audio-finder 2>$null | Out-Null
