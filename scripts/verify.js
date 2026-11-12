@@ -138,7 +138,7 @@ function confirmedTitles(db, verified) {
         if (v && v.v === 1) at = Math.max(at, v.at || 0);
       }
     }
-    if (at) out.push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, at });
+    if (at) out.push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, poster: rec.m.poster, at });
   }
   return out;
 }
@@ -157,7 +157,7 @@ function buildQueue(db, verified) {
         const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY || (RETRY_ALL_UNKNOWN && v.at < STARTED));
         if (v && !retryNow) continue;
         if (!x.sd) continue; // no seeders -> cannot probe
-        (x.t >= 2 ? strong : weak).push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, x });
+        (x.t >= 2 ? strong : weak).push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, poster: rec.m.poster, x });
       }
     }
   }
@@ -242,7 +242,7 @@ async function pass(deadline, state, P) {
         continue;
       }
       P.finish(k, name, x.nm, r);
-      if (r.v === 1) P.addConfirmed(item.id, item.type, name, item.year);
+      if (r.v === 1) P.addConfirmed(item.id, item.type, name, item.year, item.poster);
       verified[releaseKey(x)] = { ...r, at: Date.now() };
       stats[r.v === 1 ? 'yes' : r.v === 0 ? 'no' : 'unknown']++;
       log(`${r.v === 1 ? 'TR ✓' : r.v === 0 ? 'no TR' : '  ?  '} | ${name} | ${x.nm.slice(0, 70)} | ${r.a.join(',')}${r.e ? ' | ' + r.e : ''}`);
