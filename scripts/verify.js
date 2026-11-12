@@ -79,6 +79,18 @@ async function ensureServer() {
   throw new Error('Stremio streaming server did not start');
 }
 
+/** Kill Stremio's streaming server and start a fresh one (the Stremio window itself stays open). */
+async function refreshServer(state, P, why) {
+  P.phase("Restarting Stremio's torrent server", why);
+  log(`restarting Stremio streaming server (${why})`);
+  if (state.child) { try { state.child.kill(); } catch {} state.child = null; }
+  try { execFileSync('taskkill', ['/IM', 'stremio-runtime.exe', '/F'], { stdio: 'ignore' }); } catch {}
+  await sleep(4000);
+  for (let i = 0; i < 10 && !(await serverUp()); i++) await sleep(1000); // the Stremio app may respawn it
+  state.child = await ensureServer();
+  state.refreshedAt = Date.now();
+}
+
 /** Wait for Stremio's server to come back (e.g. app restarted); start it ourselves after 2 minutes. */
 async function waitForServer(state, P) {
   if (state.waiting) return state.waiting;
@@ -112,16 +124,44 @@ async function loadDb() {
   return JSON.parse(zlib.gunzipSync(buf).toString('utf8'));
 }
 
+// A torrent with no peer at all after this long is dead for now: give the slot to the next one.
+const NO_PEER_SECONDS = Number(arg('no-peer-seconds', 45));
+// Stremio's torrent engine slowly chokes after hundreds of torrents (healthy torrents stop finding
+// peers). Restart it every REFRESH_MINUTES, and right away after a pass where nothing could be read.
+const REFRESH_MINUTES = Number(arg('refresh-minutes', 45));
+
+/** Resolves 'no peers' if the engine has found no peer for this torrent after NO_PEER_SECONDS. */
+function watchPeers(ih, ctl) {
+  let stop = false;
+  const p = (async () => {
+    const t0 = Date.now();
+    while (!stop) {
+      await sleep(5000);
+      if (stop) return;
+      if (Date.now() - t0 < NO_PEER_SECONDS * 1000) continue;
+      try {
+        const st = await fetch(`${SERVER}/${ih}/stats.json`, { signal: AbortSignal.timeout(4000) }).then((r) => r.json());
+        if (st && !st.peers && !st.swarmConnections && !(st.files && st.files.length)) { ctl.abort(new Error('NoPeers')); return; }
+        if (st && (st.peers || (st.files && st.files.length))) return; // alive: let the normal timeouts apply
+      } catch { /* stats not ready yet */ }
+    }
+  })();
+  return () => { stop = true; return p; };
+}
+
 async function probeRelease(x, { patient = false } = {}) {
   const ih = x.h.toLowerCase();
+  const ctl = new AbortController();
+  const stopWatch = watchPeers(ih, ctl);
   try {
     const created = await fetch(`${SERVER}/${ih}/create`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ torrent: { infoHash: ih }, peerSearch: { sources: [`dht:${ih}`, ...TRACKERS.map((t) => `tracker:${t}`)], min: 20, max: 80 } }),
       // Seeded torrents deliver their metadata within seconds; don't block a slot on dead ones.
-      signal: AbortSignal.timeout(patient ? 150000 : 45000),
+      signal: AbortSignal.any([ctl.signal, AbortSignal.timeout(patient ? 150000 : 45000)]),
     }).then((r) => r.json());
+    stopWatch();
     let idx = x.i;
     if (!Number.isInteger(idx)) {
       // Single-file torrent or unknown index: take the largest file.
@@ -133,10 +173,12 @@ async function probeRelease(x, { patient = false } = {}) {
     if (!res.ok) return { v: -1, a: [], e: `probe HTTP ${res.status}` };
     return classifyProbe(await res.json());
   } catch (e) {
+    if (ctl.signal.aborted) return { v: -1, a: [], e: 'no peers' };
     // Stremio's server itself is unreachable (app restarting/closed): not a result, retry later.
     if (e.name !== 'TimeoutError' && !(await serverUp())) return null;
     return { v: -1, a: [], e: e.name === 'TimeoutError' ? 'timeout (no peers?)' : e.message };
   } finally {
+    stopWatch();
     fetch(`${SERVER}/${ih}/remove`).catch(() => {});
   }
 }
@@ -168,7 +210,7 @@ function buildQueue(db, verified) {
     for (const lr of Object.values(rec.r)) {
       for (const x of lr.x || []) {
         const v = verified[releaseKey(x)];
-        const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY || (RETRY_ALL_UNKNOWN && v.at < STARTED));
+        const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY * 2 ** Math.min((v.n || 1) - 1, 5) || (RETRY_ALL_UNKNOWN && v.at < STARTED));
         if (v && !retryNow) continue;
         if ((x.sd || 0) < MIN_SEEDERS) continue; // dead torrent: skip
         const weak = x.t < 2 && !x.tf;
@@ -246,7 +288,10 @@ async function pass(deadline, state, P) {
   P.batch(queue.length, Object.keys(verified).length, perTitle);
   if (!queue.length) return 0;
 
-  if (!state.child) {
+  if (!state.refreshedAt) state.refreshedAt = Date.now();
+  if (state.lastPassDead) await refreshServer(state, P, 'last pass could not read any torrent');
+  else if (Date.now() - state.refreshedAt > REFRESH_MINUTES * 60000) await refreshServer(state, P, `routine, every ${REFRESH_MINUTES} min`);
+  else if (!state.child) {
     P.phase('Starting Stremio server');
     state.child = await ensureServer();
   }
@@ -272,7 +317,8 @@ async function pass(deadline, state, P) {
       }
       P.finish(k, name, x.nm, r, item);
       if (r.v === 1) P.addConfirmed(item.id, item.type, name, item.year, item.poster);
-      verified[releaseKey(x)] = { ...r, at: Date.now() };
+      const prev = verified[releaseKey(x)];
+      verified[releaseKey(x)] = { ...r, at: Date.now(), ...(r.v === -1 ? { n: ((prev && prev.v === -1 && prev.n) || 0) + 1 } : {}) };
       stats[r.v === 1 ? 'yes' : r.v === 0 ? 'no' : 'unknown']++;
       log(`${r.v === 1 ? 'TR ✓' : r.v === 0 ? 'no TR' : '  ?  '} | ${name} | ${x.nm.slice(0, 70)} | ${r.a.join(',')}${r.e ? ' | ' + r.e : ''}`);
       if (++done % 10 === 0) save();
@@ -284,6 +330,7 @@ async function pass(deadline, state, P) {
     save();
   }
   log(`pass done: ${done} probed`, JSON.stringify(stats));
+  state.lastPassDead = done >= 20 && stats.yes + stats.no === 0;
   const pushDue = !LOOP || Date.now() - lastPushAt >= PUSH_EVERY_MINUTES * 60000 || Date.now() >= deadline - 60000;
   if (PUSH && pushDue) {
     P.phase('Uploading results to GitHub');
