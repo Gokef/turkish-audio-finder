@@ -7,13 +7,13 @@ on:
     branches: [main]
     paths: [verified.json]
   schedule:
-    # Every 2 hours, ~105 min of scanning each, so results are published often.
-    - cron: "17 */2 * * *"
+    # Every hour, ~50 min of scanning each, so results are published often.
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       minutes:
         description: "Max scan minutes"
-        default: "105"
+        default: "50"
 permissions:
   contents: write
 concurrency:
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,7 +45,8 @@ jobs:
         if: github.event_name != 'push'
         env:
           DATA_DIR: site/data
-        run: node scripts/scan.js --limit 20000 --max-minutes "${{ github.event.inputs.minutes || '105' }}"
+          TORRENTIO_MIN_INTERVAL_MS: "800"
+        run: node scripts/scan.js --limit 20000 --max-minutes "${{ github.event.inputs.minutes || '50' }}"
 
       - name: Build static addon
         env:

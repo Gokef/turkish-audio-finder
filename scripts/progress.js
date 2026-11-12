@@ -57,8 +57,8 @@ function createProgress({ file, deadline, startedAt = Date.now() }) {
     const sizes = c.catalogSizes || {};
     const run = (s.runs || [])[0];
     const runText = !run ? 'unknown'
-      : run.status === 'completed' ? `idle — last run ${run.conclusion}, next one within 2h`
-        : `scanning now (started ${clock(run.run_started_at || run.created_at)}, publishes ~${clock(new Date(run.run_started_at || run.created_at).getTime() + 115 * 60000)})`;
+      : run.status === 'completed' ? `idle — last run ${run.conclusion}, next one within 1h`
+        : `scanning now (started ${clock(run.run_started_at || run.created_at)}, publishes ~${clock(new Date(run.run_started_at || run.created_at).getTime() + 58 * 60000)})`;
 
     const cur = [...s.current.values()].map((x) => `<li><b>${esc(x.name)}</b><br><small>${esc(x.release)} · ${Math.round((now - x.since) / 1000)}s</small></li>`).join('')
       || '<li><small>nothing right now</small></li>';

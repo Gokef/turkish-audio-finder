@@ -193,7 +193,7 @@ async function pass(deadline, state, P) {
       const n = await pass(deadline, state, P);
       if (LOOP && Date.now() < deadline && !n) {
         log('nothing new to verify; waiting 20 min for new scan results');
-        P.phase('Waiting for new scan results', 'the cloud scan publishes new titles every 2 hours');
+        P.phase('Waiting for new scan results', 'the cloud scan publishes new titles every hour');
         P.nextCheck(Date.now() + 20 * 60000);
         await sleep(Math.min(20 * 60000, Math.max(0, deadline - Date.now())));
       }
