@@ -40,6 +40,9 @@ const STARTED = Date.now();
 // Releases with fewer seeders (as reported by Torrentio at scan time) are skipped as dead.
 const MIN_SEEDERS = Number(arg('min-seeders', 2));
 const HEALTHY_SEEDERS = 5;
+// Releases whose only Turkish evidence is a 🇹🇷 flag in a long flag list had Turkish audio in ~3% of
+// checks (usually the flag comes from subtitles). They are skipped unless --include-weak is given.
+const INCLUDE_WEAK = argv.includes('--include-weak');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -160,15 +163,23 @@ function buildQueue(db, verified) {
         const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY || (RETRY_ALL_UNKNOWN && v.at < STARTED));
         if (v && !retryNow) continue;
         if ((x.sd || 0) < MIN_SEEDERS) continue; // dead torrent: skip
+        if (x.t < 2 && !x.tf && !INCLUDE_WEAK) continue; // flag-only: almost never real Turkish audio
         items.push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, poster: rec.m.poster, x, retry: !!v });
       }
     }
   }
-  // Order: well-seeded first (they actually answer), never-tried before retries, then
-  // Torrentio's "Dual Audio / 🇬🇧 / 🇹🇷" label, then confidence, then more seeders.
+  // Order:
+  //  1. titles not confirmed yet before titles that already have a confirmed release
+  //  2. one release per title first (each title's best candidate), so new titles reach the list fast
+  //  3. well-seeded first, never-tried before retries, "Dual Audio / 🇬🇧 / 🇹🇷" label, confidence, seeders
   const healthy = (it) => ((it.x.sd || 0) >= HEALTHY_SEEDERS ? 1 : 0);
-  items.sort((a, b) => healthy(b) - healthy(a) || a.retry - b.retry || (b.x.tf || 0) - (a.x.tf || 0)
-    || (b.x.t >= 2) - (a.x.t >= 2) || (b.x.sd || 0) - (a.x.sd || 0));
+  const quality = (a, b) => healthy(b) - healthy(a) || a.retry - b.retry || (b.x.tf || 0) - (a.x.tf || 0)
+    || b.x.t - a.x.t || (b.x.sd || 0) - (a.x.sd || 0);
+  const confirmed = new Set(confirmedTitles(db, verified).map((c) => c.id));
+  const byTitle = new Map();
+  for (const it of items) (byTitle.get(it.id) || byTitle.set(it.id, []).get(it.id)).push(it);
+  for (const list of byTitle.values()) list.sort(quality).forEach((it, i) => { it.nth = i; });
+  items.sort((a, b) => confirmed.has(a.id) - confirmed.has(b.id) || a.nth - b.nth || quality(a, b));
   return items;
 }
 
