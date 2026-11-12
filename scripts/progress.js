@@ -65,7 +65,7 @@ function createProgress({ file, deadline, startedAt = Date.now() }) {
     const rec = s.recent.slice(0, 15).map((r) => `<tr><td>${r.v === 1 ? '✅' : r.v === 0 ? '❌' : '❔'}</td><td>${esc(r.name)}<br><small>${esc(r.release)}</small></td><td><small>${esc(r.audio || r.err || '')}</small></td><td><small>${clock(r.at)}</small></td></tr>`).join('');
 
     const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${pct}% · Turkish Audio Finder</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${s.queueTotal ? pct + '% · ' : ''}Turkish Audio Finder</title>
 <style>:root{color-scheme:dark}body{margin:0;background:#0f1115;color:#e8eaf0;font:15px/1.45 system-ui,sans-serif;padding:16px}
 main{max-width:760px;margin:0 auto}h1{font-size:1.3rem;margin:0 0 4px}h2{font-size:1rem;margin:0 0 10px;color:#9aa3b2;font-weight:600}
 .card{background:#181b22;border-radius:12px;padding:16px;margin:12px 0}.bar{height:12px;background:#2b303b;border-radius:6px;overflow:hidden;margin:8px 0}
@@ -73,7 +73,7 @@ main{max-width:760px;margin:0 auto}h1{font-size:1.3rem;margin:0 0 4px}h2{font-si
 .n{font-size:1.5rem;font-weight:700}small,.m{color:#9aa3b2}ul{margin:0;padding-left:18px}li{margin:4px 0}table{width:100%;border-collapse:collapse}
 td{padding:6px 4px;border-top:1px solid #2b303b;vertical-align:top}.ph{display:inline-block;background:#2b303b;border-radius:20px;padding:2px 10px;font-size:.85rem}</style></head>
 <body><main><h1>🇹🇷 Turkish Audio Finder — progress</h1>
-<div class="m">Updated ${clock(now)} · refreshes every 5 s · checker stops at ${clock(deadline)} (${dur(deadline - now)} left)</div>
+<div class="m">Updated ${clock(now)} · refreshes every 5 s · checker stops ${new Date(deadline).toDateString() === new Date(now).toDateString() ? 'today' : 'tomorrow'} at ${clock(deadline)} (${dur(deadline - now)} left)</div>
 
 <div class="card"><h2>Audio check on this PC</h2>
 <span class="ph">${esc(s.phase)}</span> <small>${esc(s.detail)}</small>
@@ -91,7 +91,7 @@ td{padding:6px 4px;border-top:1px solid #2b303b;vertical-align:top}.ph{display:i
 
 <div class="card"><h2>Cloud scan (GitHub)</h2>
 <div class="bar"><i style="width:${scanPct}%"></i></div>
-<small>${scanned} of ~${cand} titles scanned (${scanPct}%) · ${esc(runText)}</small>
+<small>${Math.min(scanned, cand)} of ~${cand} titles scanned (${scanPct}%) · ${esc(runText)}</small>
 <p style="margin:10px 0 0">In your Stremio catalogs now: <b>${sizes['default:movie'] ?? '–'}</b> movies · <b>${sizes['default:series'] ?? '–'}</b> series
 <br><small>Verified-only list: ${sizes['verified:movie'] ?? 0} movies · ${sizes['verified:series'] ?? 0} series · last published ${clock(c.builtAt)}</small></p></div>
 
@@ -111,6 +111,7 @@ td{padding:6px 4px;border-top:1px solid #2b303b;vertical-align:top}.ph{display:i
     phase(p, detail = '') { s.phase = p; s.detail = detail; render(); },
     batch(total, knownBefore) { s.queueTotal = total; s.queueDone = 0; s.knownBefore = knownBefore; },
     start(key, name, release) { s.current.set(key, { name, release, since: Date.now() }); },
+    drop(key) { s.current.delete(key); },
     finish(key, name, release, r) {
       s.current.delete(key);
       s.queueDone++;

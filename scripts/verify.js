@@ -65,6 +65,23 @@ async function ensureServer() {
   throw new Error('Stremio streaming server did not start');
 }
 
+/** Wait for Stremio's server to come back (e.g. app restarted); start it ourselves after 2 minutes. */
+async function waitForServer(state, P) {
+  if (state.waiting) return state.waiting;
+  state.waiting = (async () => {
+    P.phase("Waiting for Stremio's torrent server", 'it went offline (Stremio restarted or closed?)');
+    log("Stremio server unreachable; waiting");
+    for (let i = 0; i < 24; i++) {
+      if (await serverUp()) break;
+      await sleep(5000);
+    }
+    if (!(await serverUp())) state.child = await ensureServer();
+    log('Stremio server is back');
+    P.phase('Checking audio tracks', `${CONCURRENCY} releases at a time`);
+  })().finally(() => { state.waiting = null; });
+  return state.waiting;
+}
+
 async function loadDb() {
   const local = arg('db', null);
   let buf;
@@ -101,6 +118,8 @@ async function probeRelease(x) {
     if (!res.ok) return { v: -1, a: [], e: `probe HTTP ${res.status}` };
     return classifyProbe(await res.json());
   } catch (e) {
+    // Stremio's server itself is unreachable (app restarting/closed): not a result, retry later.
+    if (e.name !== 'TimeoutError' && !(await serverUp())) return null;
     return { v: -1, a: [], e: e.name === 'TimeoutError' ? 'timeout (no peers?)' : e.message };
   } finally {
     fetch(`${SERVER}/${ih}/remove`).catch(() => {});
@@ -190,10 +209,17 @@ async function pass(deadline, state, P) {
   const stats = { yes: 0, no: 0, unknown: 0 };
   const worker = async () => {
     while (idx < queue.length && Date.now() < passEnd) {
-      const { name, x } = queue[idx++];
+      const item = queue[idx++];
+      const { name, x } = item;
       const k = releaseKey(x);
       P.start(k, name, x.nm);
       const r = await probeRelease(x);
+      if (r === null) {
+        P.drop(k);
+        queue.push(item); // check again once the server is back
+        await waitForServer(state, P);
+        continue;
+      }
       P.finish(k, name, x.nm, r);
       verified[releaseKey(x)] = { ...r, at: Date.now() };
       stats[r.v === 1 ? 'yes' : r.v === 0 ? 'no' : 'unknown']++;
