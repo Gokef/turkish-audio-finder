@@ -218,7 +218,9 @@ async function pass(deadline, state, P) {
   const queue = buildQueue(db, verified);
   P.setConfirmed(confirmedTitles(db, verified));
   log(`db: ${Object.keys(db.titles).length} titles; ${queue.length} releases to verify; ${Object.keys(verified).length} already known`);
-  P.batch(queue.length, Object.keys(verified).length);
+  const perTitle = {};
+  for (const it of queue) perTitle[it.id] = (perTitle[it.id] || 0) + 1;
+  P.batch(queue.length, Object.keys(verified).length, perTitle);
   if (!queue.length) return 0;
 
   if (!state.child) {
@@ -237,7 +239,7 @@ async function pass(deadline, state, P) {
       const item = queue[idx++];
       const { name, x } = item;
       const k = releaseKey(x);
-      P.start(k, name, x.nm);
+      P.start(k, name, x.nm, item);
       const r = await probeRelease(x);
       if (r === null) {
         P.drop(k);
@@ -245,7 +247,7 @@ async function pass(deadline, state, P) {
         await waitForServer(state, P);
         continue;
       }
-      P.finish(k, name, x.nm, r);
+      P.finish(k, name, x.nm, r, item);
       if (r.v === 1) P.addConfirmed(item.id, item.type, name, item.year, item.poster);
       verified[releaseKey(x)] = { ...r, at: Date.now() };
       stats[r.v === 1 ? 'yes' : r.v === 0 ? 'no' : 'unknown']++;

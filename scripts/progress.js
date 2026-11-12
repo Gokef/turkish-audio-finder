@@ -19,6 +19,10 @@ function createProgress({ file, deadline, startedAt = Date.now() }) {
     detail: '',
     queueTotal: 0,
     queueDone: 0,
+    titleTotal: 0,
+    titlesDone: 0,
+    titleLeft: new Map(),
+    focus: null,
     session: { yes: 0, no: 0, unknown: 0 },
     knownBefore: 0,
     current: new Map(),
@@ -51,6 +55,9 @@ function createProgress({ file, deadline, startedAt = Date.now() }) {
       detail: s.detail,
       queueTotal: s.queueTotal,
       queueDone: s.queueDone,
+      titleTotal: s.titleTotal,
+      titlesDone: s.titlesDone,
+      focus: s.focus,
       session: s.session,
       knownBefore: s.knownBefore,
       current: [...s.current.values()],
@@ -84,16 +91,27 @@ function createProgress({ file, deadline, startedAt = Date.now() }) {
 
   return {
     phase(p, detail = '') { s.phase = p; s.detail = detail; writeData(); },
-    batch(total, knownBefore) { s.queueTotal = total; s.queueDone = 0; s.knownBefore = knownBefore; },
-    start(key, name, release) { s.current.set(key, { name, release, since: Date.now() }); },
+    batch(total, knownBefore, perTitle = {}) {
+      s.queueTotal = total; s.queueDone = 0; s.knownBefore = knownBefore;
+      s.titleLeft = new Map(Object.entries(perTitle)); s.titleTotal = s.titleLeft.size; s.titlesDone = 0;
+    },
+    start(key, name, release, item = {}) {
+      const now = Date.now();
+      s.current.set(key, { name, release, since: now, poster: item.poster, type: item.type });
+      s.focus = { id: item.id, name, release, type: item.type, year: item.year, poster: item.poster, since: now };
+    },
     drop(key) { s.current.delete(key); },
     setConfirmed(list) { for (const c of list) if (!s.confirmed.has(c.id)) s.confirmed.set(c.id, c); },
     addConfirmed(id, type, name, year, poster) {
       if (!s.confirmed.has(id)) s.confirmed.set(id, { id, type, name, year, poster, at: Date.now(), isNew: true });
     },
-    finish(key, name, release, r) {
+    finish(key, name, release, r, item = {}) {
       s.current.delete(key);
       s.queueDone++;
+      if (item.id && s.titleLeft.has(item.id)) {
+        const left = s.titleLeft.get(item.id) - 1;
+        if (left <= 0) { s.titleLeft.delete(item.id); s.titlesDone++; } else s.titleLeft.set(item.id, left);
+      }
       s.session[r.v === 1 ? 'yes' : r.v === 0 ? 'no' : 'unknown']++;
       s.recent.unshift({ v: r.v, name, release, audio: (r.a || []).join(', '), err: r.e, at: Date.now() });
       s.recent.length = Math.min(s.recent.length, 40);
@@ -173,6 +191,16 @@ a{color:inherit}
 .poster .cap small{color:#bbb}
 .poster .new{z-index:2;position:absolute;top:6px;left:6px;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;letter-spacing:.4px}
 .poster .ph{position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font-size:28px}
+.hero{display:flex;gap:16px;align-items:stretch;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:16px}
+.hero .hp{width:86px;flex:none;aspect-ratio:2/3;border-radius:10px;overflow:hidden;background:#0006;position:relative;display:grid;place-items:center;font-size:30px;color:var(--dim)}
+.hero .hp img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.hero .hi{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+.hero .lbl{color:var(--red2);font-size:11.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.hero .ht{font-size:20px;font-weight:700;margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero .hs{color:var(--dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar.big{height:14px}.bar.thin{height:6px;margin:6px 0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13px;color:var(--mut)}.kv b{color:var(--fg);text-align:right;font-weight:600}
+.done{display:flex;align-items:center;gap:10px;background:#22c55e14;border:1px solid #22c55e33;color:#9be7b6;border-radius:12px;padding:10px 12px;margin-bottom:14px;font-size:13px}
 .foot{color:var(--dim);font-size:12px;margin-top:18px;text-align:center}
 @media (max-width:900px){.tiles{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.status{margin-left:0}}
 </style></head>
@@ -193,18 +221,30 @@ a{color:inherit}
   <div class="grid">
     <div class="card">
       <h2>Audio check on this PC <span class="pill" id="rate"></span></h2>
-      <div class="bar"><i id="qBar" style="width:0"></i></div>
-      <div class="row"><span><b id="qDone">0</b> of <b id="qTotal">0</b> releases in this batch</span><span id="qEta"></span></div>
+      <div class="hero">
+        <div class="hp" id="hPoster">🎬</div>
+        <div class="hi">
+          <div class="lbl"><span class="spin" id="hSpin"></span><span id="hLbl">Now checking</span></div>
+          <div class="ht" id="hName">–</div>
+          <div class="hs" id="hRel"></div>
+          <div class="bar big"><i id="tBar" style="width:0"></i></div>
+          <div class="row"><span>Title <b id="tNum">0</b> of <b id="tTot">0</b> in this batch</span><span id="tPct"></span></div>
+        </div>
+      </div>
+      <div class="bar thin"><i id="qBar" style="width:0"></i></div>
+      <div class="row"><span><b id="qDone">0</b> of <b id="qTotal">0</b> releases</span><span id="qEta"></span></div>
       <div class="row" style="margin-top:4px"><span id="push"></span><span id="stopAt"></span></div>
       <h2 style="margin-top:20px">Checking right now <span class="pill" id="nowCount"></span></h2>
       <ul class="now" id="now"></ul>
     </div>
     <div class="card">
       <h2>Cloud scan · GitHub <span class="pill" id="runPill"></span></h2>
-      <div class="bar blue"><i id="cBar" style="width:0"></i></div>
-      <div class="row"><span><b id="cScanned">0</b> of <b id="cTotal">~10,900</b> titles scanned</span><span id="cPct"></span></div>
-      <div class="row" style="margin-top:12px"><span>In your Stremio list</span><span><b id="cMovies">–</b> movies · <b id="cSeries">–</b> TV shows</span></div>
-      <div class="row"><span>Last published</span><span id="cBuilt">–</span></div>
+      <div class="done" id="cDone">☁️ <span id="cDoneTxt">–</span></div>
+      <div class="kv">
+        <span>In your Stremio list</span><b><span id="cMovies">–</span> movies · <span id="cSeries">–</span> TV shows</b>
+        <span>Last published</span><b id="cBuilt">–</b>
+        <span>Next update</span><b id="cNext">–</b>
+      </div>
       <h2 style="margin-top:20px">Latest results</h2>
       <ul class="res" id="res"></ul>
     </div>
@@ -251,14 +291,15 @@ function draw(){
   const pct=D.queueTotal?Math.round(D.queueDone/D.queueTotal*100):0;
   $('qBar').style.width=pct+'%';$('qDone').textContent=fmt(D.queueDone);$('qTotal').textContent=fmt(D.queueTotal);
   const rate=done/Math.max(1/60,(D.now-D.startedAt)/3600000), left=Math.max(0,D.queueTotal-D.queueDone);
-  $('rate').textContent=done?Math.round(rate)+' / hour':'warming up';
-  $('qEta').textContent=left&&rate>0&&done?'~'+dur(left/rate*3600000)+' left · '+pct+'%':(D.queueTotal?pct+'%':'');
+  $('rate').textContent=done>=10?Math.round(rate)+' / hour':'warming up';
+  $('qEta').textContent=left&&rate>0&&done>=10?'~'+dur(left/rate*3600000)+' left · '+pct+'%':(D.queueTotal?pct+'%':'');
   $('push').textContent='Uploaded: '+(D.lastPush?clock(D.lastPush):'not yet')+' · every 30 min';
   $('stopAt').textContent=D.nextCheck&&/Waiting/.test(p)?'next look '+clock(D.nextCheck):'';
 
   const c=D.cloud, tot=c.candidates||10900, cp=Math.min(100,Math.round(c.scanned/tot*100));
-  $('cBar').style.width=cp+'%';$('cScanned').textContent=fmt(Math.min(c.scanned,tot));$('cTotal').textContent=fmt(tot);$('cPct').textContent=cp+'%';
+  $('cDoneTxt').textContent=!c.builtAt?'Loading cloud status…':cp>=99?'All '+fmt(tot)+' titles scanned. Now only re-checking for new releases.':'Scanned '+fmt(Math.min(c.scanned,tot))+' of '+fmt(tot)+' titles ('+cp+'%)';
   $('cMovies').textContent=c.sizes['default:movie']??'–';$('cSeries').textContent=c.sizes['default:series']??'–';$('cBuilt').textContent=clock(c.builtAt);
+  $('cNext').textContent=c.run&&c.run.status!=='completed'?'publishing ~'+clock(new Date(c.run.started).getTime()+55*60000):'within the hour';
   $('runPill').textContent=!c.run?'':c.run.status!=='completed'?'● scanning since '+clock(c.run.started):c.run.conclusion==='success'?'idle · next within 1h':'last run '+c.run.conclusion;
 
   $('res').innerHTML=(D.recent||[]).map(r=>'<li><span>'+(r.v===1?'✅':r.v===0?'❌':'❔')+'</span><div class="n"><b>'+esc(r.name)
@@ -278,6 +319,17 @@ function draw(){
   drawNow();
 }
 function drawNow(){
+  const f=D.focus, running=(D.current||[]).length>0;
+  const tn=Math.min(D.titleTotal,D.titlesDone+(running?1:0)), tp=D.titleTotal?Math.round(D.titlesDone/D.titleTotal*100):0;
+  $('tBar').style.width=tp+'%';$('tNum').textContent=fmt(tn);$('tTot').textContent=fmt(D.titleTotal);$('tPct').textContent=D.titleTotal?tp+'%':'';
+  $('hSpin').style.display=running?'':'none';
+  $('hLbl').textContent=running?'Now checking':'Last checked';
+  if(f){
+    $('hName').textContent=f.name+(f.year?' ('+f.year+')':'');
+    $('hRel').textContent=f.release+(running?' · '+Math.max(0,Math.round((Date.now()-f.since)/1000))+'s':'');
+    const key=f.id+'|'+(f.poster||'');
+    if($('hPoster').dataset.k!==key){$('hPoster').dataset.k=key;$('hPoster').innerHTML=(f.type==='series'?'📺':'🎬')+(f.poster?'<img src="'+esc(f.poster)+'" onerror="this.remove()">':'');}
+  } else { $('hName').textContent=/Waiting/.test(D.phase)?'Waiting for new titles':'–'; $('hRel').textContent=''; }
   const cur=D.current||[];
   $('nowCount').textContent=cur.length?cur.length+' running':'';
   $('now').innerHTML=cur.map(x=>'<li><span class="spin"></span><div class="t"><b>'+esc(x.name)+'</b><small>'+esc(x.release)+'</small></div><span class="sec">'+Math.max(0,Math.round((Date.now()-x.since)/1000))+'s</span></li>').join('')||'<div class="empty">Nothing right now</div>';
