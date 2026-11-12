@@ -26,6 +26,7 @@ function createProgress({ file, deadline, startedAt = Date.now() }) {
     knownBefore: 0,
     current: new Map(),
     recent: [],
+    confirmed: new Map(),
     lastPush: null,
     nextCheck: null,
     cloud: null,
@@ -41,6 +42,18 @@ function createProgress({ file, deadline, startedAt = Date.now() }) {
       const j = await (await fetch(RUNS_API, { headers: { 'user-agent': 'taf-progress' }, signal: AbortSignal.timeout(15000) })).json();
       s.runs = (j.workflow_runs || []).filter((r) => r.name === 'scan-and-publish');
     } catch { /* keep last */ }
+  }
+
+  function confirmedCard() {
+    const all = [...s.confirmed.values()].sort((a, b) => (b.at || 0) - (a.at || 0));
+    const col = (type, title) => {
+      const items = all.filter((c) => c.type === type);
+      const li = items.map((c) => `<li>${c.isNew ? '🆕 ' : ''}<a style="color:#e8eaf0" href="https://www.imdb.com/title/${c.id}/" target="_blank">${esc(c.name)}</a> <small>${esc(c.year || '')}</small></li>`).join('');
+      return `<div><b>${title} (${items.length})</b><ul class="cl">${li || '<li><small>none yet</small></li>'}</ul></div>`;
+    };
+    return `<div class="card"><h2>✅ Confirmed with Turkish audio — ${all.length} titles</h2>
+<div class="grid2">${col('movie', '🎬 Movies')}${col('series', '📺 TV shows')}</div>
+<small>🆕 = confirmed since the checker started · newest first · these are the titles in your Stremio list (after the next hourly publish)</small></div>`;
   }
 
   function render() {
@@ -71,7 +84,7 @@ main{max-width:760px;margin:0 auto}h1{font-size:1.3rem;margin:0 0 4px}h2{font-si
 .card{background:#181b22;border-radius:12px;padding:16px;margin:12px 0}.bar{height:12px;background:#2b303b;border-radius:6px;overflow:hidden;margin:8px 0}
 .bar i{display:block;height:100%;background:#e30a17}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
 .n{font-size:1.5rem;font-weight:700}small,.m{color:#9aa3b2}ul{margin:0;padding-left:18px}li{margin:4px 0}table{width:100%;border-collapse:collapse}
-td{padding:6px 4px;border-top:1px solid #2b303b;vertical-align:top}.ph{display:inline-block;background:#2b303b;border-radius:20px;padding:2px 10px;font-size:.85rem}</style></head>
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.cl{max-height:340px;overflow:auto;margin-top:6px}td{padding:6px 4px;border-top:1px solid #2b303b;vertical-align:top}.ph{display:inline-block;background:#2b303b;border-radius:20px;padding:2px 10px;font-size:.85rem}</style></head>
 <body><main><h1>🇹🇷 Turkish Audio Finder — progress</h1>
 <div class="m">Updated ${clock(now)} · refreshes every 5 s · checker stops ${new Date(deadline).toDateString() === new Date(now).toDateString() ? 'today' : 'tomorrow'} at ${clock(deadline)} (${dur(deadline - now)} left)</div>
 
@@ -95,6 +108,8 @@ td{padding:6px 4px;border-top:1px solid #2b303b;vertical-align:top}.ph{display:i
 <p style="margin:10px 0 0">In your Stremio catalogs now: <b>${sizes['default:movie'] ?? '–'}</b> movies · <b>${sizes['default:series'] ?? '–'}</b> series
 <br><small>Verified-only list: ${sizes['verified:movie'] ?? 0} movies · ${sizes['verified:series'] ?? 0} series · last published ${clock(c.builtAt)}</small></p></div>
 
+${confirmedCard()}
+
 <div class="card"><h2>Latest results</h2><table>${rec || '<tr><td><small>none yet</small></td></tr>'}</table></div>
 </main></body></html>`;
     try {
@@ -112,6 +127,10 @@ td{padding:6px 4px;border-top:1px solid #2b303b;vertical-align:top}.ph{display:i
     batch(total, knownBefore) { s.queueTotal = total; s.queueDone = 0; s.knownBefore = knownBefore; },
     start(key, name, release) { s.current.set(key, { name, release, since: Date.now() }); },
     drop(key) { s.current.delete(key); },
+    setConfirmed(list) { for (const c of list) if (!s.confirmed.has(c.id)) s.confirmed.set(c.id, c); },
+    addConfirmed(id, type, name, year) {
+      if (!s.confirmed.has(id)) s.confirmed.set(id, { id, type, name, year, at: Date.now(), isNew: true });
+    },
     finish(key, name, release, r) {
       s.current.delete(key);
       s.queueDone++;

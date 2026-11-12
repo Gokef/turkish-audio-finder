@@ -126,6 +126,23 @@ async function probeRelease(x) {
   }
 }
 
+/** Titles with at least one release whose Turkish audio track was confirmed. */
+function confirmedTitles(db, verified) {
+  const out = [];
+  for (const [id, rec] of Object.entries(db.titles)) {
+    if (!rec.r || !rec.m) continue;
+    let at = 0;
+    for (const lr of Object.values(rec.r)) {
+      for (const x of lr.x || []) {
+        const v = verified[releaseKey(x)];
+        if (v && v.v === 1) at = Math.max(at, v.at || 0);
+      }
+    }
+    if (at) out.push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, at });
+  }
+  return out;
+}
+
 function buildQueue(db, verified) {
   const now = Date.now();
   const titles = Object.entries(db.titles)
@@ -140,7 +157,7 @@ function buildQueue(db, verified) {
         const retryNow = v && v.v === -1 && (now - v.at >= RETRY_UNKNOWN_DAYS * DAY || (RETRY_ALL_UNKNOWN && v.at < STARTED));
         if (v && !retryNow) continue;
         if (!x.sd) continue; // no seeders -> cannot probe
-        (x.t >= 2 ? strong : weak).push({ id, name: rec.m.name, x });
+        (x.t >= 2 ? strong : weak).push({ id, type: rec.t, name: rec.m.name, year: rec.m.releaseInfo, x });
       }
     }
   }
@@ -195,6 +212,7 @@ async function pass(deadline, state, P) {
   const verified = loadVerified(VERIFIED_FILE);
   const db = await loadDb();
   const queue = buildQueue(db, verified);
+  P.setConfirmed(confirmedTitles(db, verified));
   log(`db: ${Object.keys(db.titles).length} titles; ${queue.length} releases to verify; ${Object.keys(verified).length} already known`);
   P.batch(queue.length, Object.keys(verified).length);
   if (!queue.length) return 0;
@@ -224,6 +242,7 @@ async function pass(deadline, state, P) {
         continue;
       }
       P.finish(k, name, x.nm, r);
+      if (r.v === 1) P.addConfirmed(item.id, item.type, name, item.year);
       verified[releaseKey(x)] = { ...r, at: Date.now() };
       stats[r.v === 1 ? 'yes' : r.v === 0 ? 'no' : 'unknown']++;
       log(`${r.v === 1 ? 'TR ✓' : r.v === 0 ? 'no TR' : '  ?  '} | ${name} | ${x.nm.slice(0, 70)} | ${r.a.join(',')}${r.e ? ' | ' + r.e : ''}`);
